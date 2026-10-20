@@ -1,5 +1,6 @@
-{{- if and .isServer (eq .chezmoi.os "linux") -}}
+{{- if and .isServer (ne .chezmoi.os "windows") -}}
 #!/bin/sh
+# Linux Server and macOS Desktop + Server.
 # Installs the manifest uv tools at their locked versions (executables land in
 # ~/.local/bin). A pin that fails is retried unpinned with a warning. Reruns when
 # a pin changes. Never aborts apply.

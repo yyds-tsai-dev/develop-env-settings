@@ -1,5 +1,6 @@
-{{- if and .isServer (eq .chezmoi.os "linux") -}}
+{{- if and .isServer (ne .chezmoi.os "windows") -}}
 #!/bin/sh
+# Linux Server and macOS Desktop + Server.
 # Installs fnm (locked version) into ~/.local/bin, then Node {{ .node.major }} as the
 # fnm default. Old Node installs (~/.nvm, ~/.local/node-v*) are left alone;
 # bin/cleanup removes them. Never aborts apply.
@@ -13,7 +14,7 @@ warn() { echo "warning: $*" >&2; }
 
 if [ "$("$FNM" --version 2>/dev/null)" != "fnm $FNM_VERSION" ]; then
     tmp="$(mktemp -d)"
-    url="https://github.com/Schniz/fnm/releases/download/v$FNM_VERSION/fnm-linux.zip"
+    url="https://github.com/Schniz/fnm/releases/download/v$FNM_VERSION/fnm-{{ if eq .chezmoi.os "darwin" }}macos{{ else }}linux{{ end }}.zip"
     if curl -fsSL --retry 3 -o "$tmp/fnm.zip" "$url"; then
         if command -v unzip >/dev/null 2>&1; then
             unzip -q -o "$tmp/fnm.zip" -d "$tmp/x"

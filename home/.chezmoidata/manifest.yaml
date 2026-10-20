@@ -1,11 +1,12 @@
 # What to install. Every entry's `name` is unique across this file and is its key in versions.yaml.
 # source: pypi:<pkg> | npm:<pkg> | github:<owner>/<repo> (latest release) |
 #         github-head:<owner>/<repo>[@branch] (branch head, 12-char SHA) | conda-forge:<pkg> | none
+# cli_tools brew: the Homebrew formula when it differs from name (macOS Desktop + Server).
 cli_tools:
   - { name: fish, source: "conda-forge:fish", winget: null, platforms: [linux, darwin] }
   - { name: tmux, source: "conda-forge:tmux", platforms: [linux, darwin] }
   - { name: fzf, source: "conda-forge:fzf", winget: junegunn.fzf }
-  - { name: fd-find, source: "conda-forge:fd-find", winget: sharkdp.fd }
+  - { name: fd-find, source: "conda-forge:fd-find", winget: sharkdp.fd, brew: fd }
   - { name: bat, source: "conda-forge:bat", winget: sharkdp.bat }
   - { name: ripgrep, source: "conda-forge:ripgrep", winget: BurntSushi.ripgrep.MSVC }
   - { name: jq, source: "conda-forge:jq", winget: jqlang.jq }
