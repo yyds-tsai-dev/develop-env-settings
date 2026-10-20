@@ -38,7 +38,7 @@ jobs:
       - name: pytest
         run: |
           if [ -d tests/py ]; then
-            uv run --python 3.12 --with pytest --with pyyaml --with httpx pytest tests/py -v
+            uv run --python 3.12 --with pytest --with pyyaml --with httpx --with tomlkit pytest tests/py -v
           else
             echo "no tests/py yet"
           fi

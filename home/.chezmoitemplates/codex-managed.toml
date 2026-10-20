@@ -1,0 +1,52 @@
+{{- /* Managed part of ~/.codex/config.toml, merged in by lib/merge_codex_config.py
+       (modify_private_config.toml.tmpl). MCP servers come from the Manifest at
+       locked versions with bare commands; every server carries tool_timeout_sec.
+       Everything not listed here (projects, hooks.state, ...) stays machine-local. */ -}}
+model = "gpt-6-astra"
+model_context_window = 1000000
+model_reasoning_effort = "medium"
+approvals_reviewer = "user"
+{{- range .mcp }}
+{{- if has "codex" .clients }}
+{{- $v := index $.versions .name }}
+{{- $args := list }}
+{{- range .args }}
+{{- if $v }}{{ $args = append $args (replace "{version}" $v .) }}{{ else }}{{ $args = append $args (. | replace "=={version}" "" | replace "@{version}" "@latest") }}{{ end }}
+{{- end }}
+{{- $n := trimPrefix "mcp-" .name }}
+
+[mcp_servers.{{ $n }}]
+command = {{ .command | toJson }}
+{{- if $args }}
+args = {{ $args | toJson }}
+{{- end }}
+{{- if index . "codex_env_vars" }}
+env_vars = {{ .codex_env_vars | toJson }}
+{{- end }}
+tool_timeout_sec = 120
+{{- range (index . "codex_approve_tools" | default list) }}
+
+[mcp_servers.{{ $n }}.tools.{{ . }}]
+approval_mode = "approve"
+{{- end }}
+{{- end }}
+{{- end }}
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "codebase-memory-mcp hook-augment"
+timeout = 5
+
+[[hooks.SubagentStart]]
+matcher = "*"
+
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "codebase-memory-mcp hook-augment"
+timeout = 5
+
+[tui]
+status_line = ["model-with-reasoning", "permissions", "weekly-limit", "context-window-size", "context-used", "thread-name"]

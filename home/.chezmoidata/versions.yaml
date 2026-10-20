@@ -5,6 +5,8 @@ versions:
   chezmoi: 2.73.2
   codebase-memory-mcp: 0.12.1
   codex: 0.163.0
+  codex-bundle-academic-research-skills: 3.23.1
+  codex-bundle-superpowers: 7.0.0
   fd-find: 10.5.0
   fish: 4.9.3
   fnm: 1.39.0

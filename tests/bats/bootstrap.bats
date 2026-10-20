@@ -222,3 +222,46 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   [[ "$output" == *"modes=700 600"* ]]
   no_fail_lines
 }
+
+@test "codex install in container" {
+  run in_box "$BOOT >/tmp/b.log 2>&1; echo \"boot-rc=\$?\"
+    export PATH=\$HOME/.local/bin:\$PATH
+    echo \"codex-version=\$(codex --version 2>/dev/null)\"
+    c=~/.codex/config.toml
+    s1=\$(sha256sum \$c)
+    d=\$(chezmoi diff --no-pager 2>/dev/null); [ -z \"\$d\" ] && echo DIFF-EMPTY || echo \"diff after bootstrap: \$d\"
+    # rerun the install script and the merge: nothing changes
+    chezmoi execute-template < ~/.local/share/chezmoi/home/.chezmoiscripts/run_onchange_after_55-codex.sh.tmpl > /tmp/x.sh
+    sh /tmp/x.sh > /tmp/x.log 2>&1; echo \"rerun-rc=\$?\"; cat /tmp/x.log
+    chezmoi apply --no-tty >/dev/null 2>&1
+    [ \"\$(sha256sum \$c)\" = \"\$s1\" ] && echo CONFIG-STABLE
+    echo \"servers=\$(grep -c '^\[mcp_servers\.[^.]*\]\$' \$c) timeouts=\$(grep -c '^tool_timeout_sec = 120\$' \$c)\"
+    grep -nE '\"/|/home/' \$c && echo ABSOLUTE-IN-CONFIG
+    codex mcp list 2>/dev/null
+    for l in ~/.codex/skills/*; do
+      [ -L \"\$l\" ] || continue
+      case \"\$(readlink \"\$l\")\" in /*) echo \"ABSOLUTE-LINK \$l\" ;; esac
+      [ -f \"\$l/SKILL.md\" ] || echo \"BROKEN-LINK \$l\"
+    done
+    echo \"links=\$(find ~/.codex/skills -maxdepth 1 -type l | wc -l)\"
+    [ -s ~/.codex/agents/codebase-memory.toml ] && echo CBM-AGENT-OK
+    ~/.local/share/chezmoi/bin/doctor --ci; echo \"doctor-rc=\$?\""
+  echo "$output"
+  [[ "$output" == *"boot-rc=0"* ]]
+  [[ "$output" == *"codex-version=codex-cli $(sed -n 's/^  codex: *//p' "$REPO_ROOT/home/.chezmoidata/versions.yaml")"* ]]
+  [[ "$output" == *DIFF-EMPTY* ]]
+  [[ "$output" == *"rerun-rc=0"* ]]
+  [[ "$output" == *CONFIG-STABLE* ]]
+  [[ "$output" == *"servers=5 timeouts=5"* ]]
+  [[ "$output" != *ABSOLUTE-IN-CONFIG* ]]
+  [[ "$output" != *ABSOLUTE-LINK* ]]
+  [[ "$output" != *BROKEN-LINK* ]]
+  [[ "$output" == *CBM-AGENT-OK* ]]
+  for s in semble codebase-memory-mcp drawio graphify paper-search; do
+    printf '%s\n' "$output" | grep -qE "^$s +"
+  done
+  for c in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $c"* ]]; done
+  [[ "$output" == *"SKIP codex_login"* ]]
+  [[ "$output" == *"doctor-rc=0"* ]]
+  no_fail_lines
+}
