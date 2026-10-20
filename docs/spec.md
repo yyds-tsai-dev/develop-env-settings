@@ -18,7 +18,7 @@ Out: project toolchains and secrets (DREAMPlace, OpenROAD, CUDA, Innovus, projec
 | Role | OS | Gets |
 |---|---|---|
 | Server | Linux x86_64, no admin rights | Full environment, all under userland paths |
-| Desktop | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client + key, Nerd Font, Bitwarden CLI |
+| Desktop | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client + key, Nerd Font, Bitwarden CLI (no Claude Code, Codex or agent tooling) |
 | Desktop + Server | macOS (opt-in) | Both, Server tools via Homebrew |
 | Server via WSL2 | Windows | Treated as a Linux Server |
 
@@ -67,11 +67,11 @@ Items:
 
 ## Agent-runnable
 
-`AGENTS.md` (with `CLAUDE.md` symlink) gives an agent the Bootstrap order, the steps only the person can do (Bitwarden unlock, GitHub key upload, Claude/Codex login, admin-rights commands) and the done condition: Doctor reports every item PASS.
+`AGENTS.md` (with `CLAUDE.md` symlink) gives an agent the Bootstrap order, the steps only the person can do (Bitwarden unlock, GitHub key upload, Claude/Codex login, admin-rights commands) and the done condition: Doctor reports no FAIL (WARN allowed).
 
 ## Verification
 
-GitHub Actions on every push: Ubuntu container as a non-admin user (full Server install + Doctor), macOS runner (Desktop + Server), Windows runner (Desktop). Bitwarden and login steps are skipped in CI.
+GitHub Actions on every push: Ubuntu container as a non-admin user (full Server install + Doctor), macOS runner (Desktop + Server), Windows runner (Desktop); each Bootstrap must end with Doctor reporting no FAIL (WARN allowed). Bitwarden and login steps are skipped in CI.
 
 ## Delivery
 
