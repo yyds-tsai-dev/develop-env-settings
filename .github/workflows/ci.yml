@@ -20,6 +20,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Set up tools
         run: tests/setup-tools.sh
+      # before bats: server-role renders run uv (modify_ authorized_keys)
+      - uses: astral-sh/setup-uv@v5
       - name: bats
         # bootstrap.bats and the claude docker test skip themselves off Linux; on ubuntu they run in the docker step below.
         env:
@@ -27,9 +29,12 @@ jobs:
         run: .tools/bin/bats tests/bats
       - name: docker server bootstrap
         if: runner.os == 'Linux'
-        timeout-minutes: 45
-        run: .tools/bin/bats -T tests/bats/bootstrap.bats tests/bats/claude.bats
-      - uses: astral-sh/setup-uv@v5
+        timeout-minutes: 75
+        run: .tools/bin/bats -T tests/bats/bootstrap.bats
+      - name: docker claude install
+        if: runner.os == 'Linux'
+        timeout-minutes: 75
+        run: .tools/bin/bats -T --filter-tags docker tests/bats/claude.bats
       - name: pytest
         run: |
           if [ -d tests/py ]; then

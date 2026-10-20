@@ -9,6 +9,10 @@ ENVFILE=".config/paper-search-mcp/.env"
 setup() {
   new_sandbox
   STUB="$SB/stub"; mkdir -p "$STUB"
+  # The repo-content check runs everywhere; the rest render the server role,
+  # which is Linux-only (desktop-role Secret coverage comes with Task 10).
+  [[ "$BATS_TEST_DESCRIPTION" == "no secret values are committed in the repo" ]] && return 0
+  [ "$(uname -s)" = Linux ] || skip "server-role Secret tests need a linux host (this host: $(uname -s))"
   init_role server >&2
 }
 teardown() { rm -rf "$SB"; }
@@ -47,7 +51,7 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   [ -f "$SB_DEST/$ENVFILE" ]
   grep -qx 'PAPER_SEARCH_MCP_IEEE_API_KEY=FAKE-IEEE-KEY' "$SB_DEST/$ENVFILE"
   grep -qx 'PAPER_SEARCH_MCP_UNPAYWALL_EMAIL=fake@example.invalid' "$SB_DEST/$ENVFILE"
-  [ "$(stat -c %a "$SB_DEST/$ENVFILE")" = 600 ]
+  [ "$(stat -c %a "$SB_DEST/$ENVFILE" 2>/dev/null || stat -f %Lp "$SB_DEST/$ENVFILE")" = 600 ]
 }
 
 @test "locked vault: file absent and one warning" {
@@ -76,7 +80,7 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
 
 @test "unlocked vault but item missing: file absent, exits 0" {
   stub_bw unlocked
-  sed -i 's/paper-search/other-item/' "$STUB/bw"
+  sed 's/paper-search/other-item/' "$STUB/bw" > "$SB/bw.new" && cat "$SB/bw.new" > "$STUB/bw"
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   [ ! -e "$SB_DEST/$ENVFILE" ]
@@ -106,7 +110,7 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   stub_bw unlocked
   apply_with "$STUB"
   before="$(sha256sum "$SB_DEST/$ENVFILE")"
-  sed -i 's/unpaywall_email/other_field/' "$STUB/bw"
+  sed 's/unpaywall_email/other_field/' "$STUB/bw" > "$SB/bw.new" && cat "$SB/bw.new" > "$STUB/bw"
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   [ "$(sha256sum "$SB_DEST/$ENVFILE")" = "$before" ]

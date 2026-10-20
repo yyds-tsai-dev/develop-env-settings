@@ -88,6 +88,17 @@ render_server() {
   [ "$(stat -c %a "$f")" = 600 ]
 }
 
+@test "authorized_keys merge falls back to python3 when uv is absent" {
+  case "$(uname -s)" in Linux) ;; *) skip "server render needs linux" ;; esac
+  [ -x /usr/bin/python3 ] || skip "no /usr/bin/python3"
+  [ ! -e /usr/bin/uv ] && [ ! -e /bin/uv ] || skip "host has a system uv"
+  init_role server >&2
+  PATH=/usr/bin:/bin run chezmoi_iso apply --exclude scripts --destination "$SB_DEST"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qF "$(cut -d' ' -f2 "$REPO_ROOT/ssh/authorized_keys.pub-list" | head -n1)" "$SB_DEST/.ssh/authorized_keys"
+}
+
 @test "desktop role does not manage authorized_keys" {
   case "$(uname -s)" in Darwin) ;; *) skip "desktop render needs macOS/Windows host" ;; esac
   init_role desktop >&2

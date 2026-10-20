@@ -1,2 +1,6 @@
 #!/bin/sh
-exec uv run --script {{ .chezmoi.workingTree }}/lib/merge_authorized_keys.py {{ .chezmoi.workingTree }}/ssh/authorized_keys.pub-list
+# merge_authorized_keys.py is stdlib-only: uv runs it, else plain python3.
+if command -v uv >/dev/null 2>&1; then
+    exec uv run --script {{ .chezmoi.workingTree }}/lib/merge_authorized_keys.py {{ .chezmoi.workingTree }}/ssh/authorized_keys.pub-list
+fi
+exec python3 -I {{ .chezmoi.workingTree }}/lib/merge_authorized_keys.py {{ .chezmoi.workingTree }}/ssh/authorized_keys.pub-list
