@@ -34,7 +34,7 @@
 1. **Running Bootstrap twice:** the second run changes nothing. No duplicate `authorized_keys` line, PATH entry, MCP registration or plugin, and no new SSH key. Tested in Task 4 (Docker double run) and Task 5 (merge idempotence).
 2. **A Server whose home already holds a different, unmanaged `~/.bashrc`, `~/.config/fish` or `~/.codex/config.toml`:** chezmoi replaces the managed files, but machine-local Codex sections (`[projects.*]`, `hooks.state`) and every existing `authorized_keys` line survive. Tested in Tasks 5 and 8.
 3. **Bitwarden absent or locked:** apply still succeeds, prints one warning per skipped file, and leaves no empty or partial `.env` or `~/.ssh/config`. Tested in Task 6.
-4. **Shared home:** on a home mounted over NFS, Bootstrap never runs `chezmoi apply` (that would rewrite every machine on the mount); it runs only `bin/machine-local` (SSH key, `known_hosts`, VS Code server extensions) unless the person passes `--apply-shared-home` by hand. Tested in Task 4.
+4. **Existing or shared home:** apply backs up every file it changes, warns (NFS or long-running processes) without stopping, never deletes old tools, and does nothing but `bin/machine-local` when `~/.config/develop-env/hold` exists. Tested in Task 4.
 5. **No network to one upstream** (PyPI, npm or GitHub down) during resolve: the resolver keeps the previous lock value for that entry, warns, and exits 0. It does not write an empty version. Tested in Task 3.
 6. **Fresh-machine lock drift:** the resolver dirties `versions.yaml` in the chezmoi source clone; a later `bin/update` must not fail on a pull conflict over that file. Tested in Task 4.
 
@@ -68,7 +68,8 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
 - **chezmoi data** (from `.chezmoi.toml.tmpl`):
   - `.role`: one of `"server"`, `"desktop"`, `"desktop+server"`. Set by `promptChoiceOnce`; CI sets it with `--promptChoice role=...`.
   - `.isServer`, `.isDesktop`: bool.
-  - `.sharedHome`: bool.
+  - `.sharedHome`: bool (warning only).
+  - `.hold`: bool, true when `~/.config/develop-env/hold` exists.
   - `.ci`: bool, true when env `CI=true`.
 - **Shared-home rule:**
   - Linux only.
@@ -77,7 +78,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   - `cli_tools`: list. Linux: micromamba env `cli-tools`. macOS: brew. Windows: winget id via `winget:` field.
   - `pdftools`: list.
   - `uv_tools`: list with `spec` (e.g. `"semble[mcp]"`).
-  - `node`: `{ major: 22 }`.
+  - `node`: `{ major: 24 }`.
   - `mcp`: list with `command`, `args` (may contain `{version}`), and `clients: [claude, codex]`.
   - `claude.marketplaces`: list of `{name, source}`.
   - `claude.plugins`: list of `{name, marketplace}`.
@@ -123,6 +124,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
     - `micromamba shell hook` with `MAMBA_ROOT_PREFIX={{ .chezmoi.homeDir }}/micromamba`.
     - `fnm env`.
     - The existing interactive-TTY `exec fish` guard, moved to the end so PATH, micromamba and fnm are already set before fish starts.
+  - `home/modify_dot_tcshrc.tmpl` (and `modify_dot_cshrc.tmpl`, active only when `~/.tcshrc` is absent and `~/.cshrc` exists): keep the existing content byte for byte and replace or append one block between `# >>> develop-env >>>` and `# <<< develop-env <<<` at the end of the file. The block puts `~/.local/bin` first on PATH and runs `exec fish` only when interactive (`$?prompt`), stdin is a TTY, and `fish` is on PATH. When neither file exists, nothing is created.
     - `[ -f ~/.bashrc.local ] && . ~/.bashrc.local`.
   - `home/dot_tmux.conf`: copied verbatim from `~/.tmux.conf`.
   - `home/dot_gitconfig.tmpl`: user name, user email, LFS filter, `[include] path = ~/.gitconfig.local`.
@@ -146,6 +148,8 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   - `@test "tmux conf loads"`: `tmux -L t -f <rendered> start-server \; kill-server` exits 0.
   - `@test "vscode_remote_env.fish no longer sets GIT_ASKPASS"`.
   - `@test "gitconfig includes ~/.gitconfig.local"`.
+  - `@test "tcshrc keeps existing content and gets one develop-env block"`: render twice over a `.tcshrc` fixture holding a Cadence-style `source` line; the line is unchanged, exactly one block exists, and it is the last thing in the file.
+  - `@test "no tcshrc or cshrc: none created"`.
 - [ ] **Step 2:** Run it. Expected: FAIL.
 - [ ] **Step 3:** Implement the files. Doctor checks: `fish` on PATH, `fisher list` contains `ilancosman/tide`, `tmux -V` ≥ 3.0, `git config user.email` is non-empty.
 - [ ] **Step 4:** Run it. Expected: PASS.
@@ -188,7 +192,8 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   - `bootstrap.sh`
   - `bin/update`
   - `home/.chezmoiscripts/run_once_before_00-prereqs.sh.tmpl`: lists missing `curl`, `git`, `tar`, `bzip2` as `sudo apt install ...` text and exits 0.
-  - `run_onchange_after_10-micromamba-envs.sh.tmpl`: `cli-tools` and `pdftools` envs from the manifest at their locked versions. Skipped when `.sharedHome`.
+  - `run_onchange_after_10-micromamba-envs.sh.tmpl`: `cli-tools` and `pdftools` envs from the manifest at their locked versions. Never removes any existing env.
+  - `bin/cleanup`: lists, then (after a y/N prompt) removes the tools apply leaves behind: micromamba env or prefix `~/.local/fish-env`, `~/.nvm`, `~/.local/node-v*` and its `~/.local/node` link, and dangling `~/.local/bin` symlinks.
   - `run_onchange_after_15-symlinks.sh.tmpl`: `~/.local/bin` links into the `cli-tools` and `pdftools` env `bin/`.
   - `run_onchange_after_20-node.sh.tmpl`: installs fnm, then `fnm install {node.major}` and `fnm default`.
   - `run_onchange_after_30-uv-tools.sh.tmpl`.
@@ -207,7 +212,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   5. Run `bin/doctor`.
 
   `bin/update` first runs `git -C <source> checkout -- home/.chezmoidata/versions.yaml`, then `chezmoi update`, resolve, apply and doctor.
-  When `.sharedHome` is true, `bootstrap.sh` and `bin/update` skip `chezmoi apply`, print `shared home: not applying dotfiles (pass --apply-shared-home to override)`, and run only `bin/machine-local`. `--apply-shared-home` is person-only and named so in AGENTS.md.
+  Before `chezmoi apply`, `bootstrap.sh` and `bin/update` copy every target that `chezmoi status` reports as changing into `~/.dotfiles-backup-<YYYYmmdd-HHMMSS>/` (same relative paths), and print the path. When `.sharedHome` is true, or `ps` shows processes of the user older than 10 minutes other than shells, tmux, sshd, the VS Code server, claude, codex and bootstrap's own tree, they print a warning naming them and continue. When `.hold` is true they print `hold file present: not applying dotfiles`, skip `chezmoi apply`, and run only `bin/machine-local`.
 - One-line Bootstrap (README):
 
   ```
@@ -219,7 +224,10 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
 - [ ] **Step 1:** Write `bootstrap.bats`. Each test runs `docker run` on the image with the repo mounted read-only and `--source /repo --role server --ci`.
   - `@test "server bootstrap in container ends with doctor PASS"`.
   - `@test "second bootstrap changes nothing"`: `chezmoi diff` is empty, the PATH line count in `.bashrc` is unchanged, and `micromamba env list` has the same lines.
-  - `@test "shared home: no managed dotfile written"`: with `DEVENV_FAKE_FSTYPE=nfs4`, after bootstrap `$HOME/.bashrc` is byte-identical to the image's original, `~/.config/fish/fish_plugins` does not exist, and the log contains `shared home: not applying dotfiles`.
+  - `@test "hold file: no managed dotfile written"`: with `~/.config/develop-env/hold` present, after bootstrap `$HOME/.bashrc` is byte-identical to the image's original, `~/.config/fish/fish_plugins` does not exist, and the log contains `hold file present: not applying dotfiles`.
+  - `@test "nfs home: warns and applies"`: with `DEVENV_FAKE_FSTYPE=nfs4`, the log contains `warning:` and `network`, and doctor passes.
+  - `@test "apply backs up changed files"`: the image's original `.bashrc` is byte-identical to `~/.dotfiles-backup-*/.bashrc`.
+  - `@test "apply never deletes old tools"`: a pre-created `~/.nvm/nvm.sh` and `~/.local/fish-env/bin/fish` still exist after bootstrap; `bin/cleanup --yes` then removes them.
   - `@test "update after a dirty lock does not conflict"`: bootstrap, modify the lock in the source clone, advance the upstream fixture repo's lock, run `bin/update`; it exits 0.
   - `@test "missing bzip2 is printed as a command, not run"`.
 - [ ] **Step 2:** Run `.tools/bin/bats tests/bats/bootstrap.bats`. Expected: FAIL.

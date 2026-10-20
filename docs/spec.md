@@ -22,7 +22,7 @@ Out: project toolchains and secrets (DREAMPlace, OpenROAD, CUDA, Innovus, projec
 | Desktop + Server | macOS (opt-in) | Both, Server tools via Homebrew |
 | Server via WSL2 | Windows | Treated as a Linux Server |
 
-Shared home: when the home directory is on a network filesystem (NFS), Bootstrap never applies dotfiles, because that would change every machine mounting it; it runs only the machine-local steps (SSH key, `known_hosts`, VS Code server extensions). Applying dotfiles to a shared home needs an explicit override flag that only the person passes.
+Existing homes: the intended use is a new machine where nothing runs yet, so Bootstrap applies by default, including on a home mounted from network storage (NFS), which only the same account's machines see. Before applying it always backs up every file it will change to `~/.dotfiles-backup-<timestamp>`, and when the home is on NFS or the account has processes running longer than 10 minutes (other than shells, tmux, sshd, the VS Code server, Claude Code, Codex and Bootstrap itself) it prints a warning listing them, then continues. Apply only adds and replaces; it never deletes old tools (previous micromamba envs, nvm, tarball Node) — `bin/cleanup` removes those when the person runs it. A home containing `~/.config/develop-env/hold` never gets dotfiles applied; Bootstrap then runs only the machine-local steps (SSH key, `known_hosts`, VS Code server extensions). On a machine whose home already has a working environment, the person reviews `chezmoi diff` before the first apply.
 
 Steps that need admin rights (system packages, Homebrew's first install, elevated winget) are never run automatically; Bootstrap prints the exact commands and continues.
 
@@ -41,10 +41,10 @@ Steps that need admin rights (system packages, Homebrew's first install, elevate
 
 ## Components
 
-- **Shell**: fish launched from `.bashrc` via the existing interactive-TTY `exec fish` guard (login shell cannot be changed on directory-service accounts). fisher plugins: fisher, z, sponge, autopair, fzf.fish, tide v6; tide settings captured. `vscode_remote_env.fish` kept for `VSCODE_IPC_HOOK_CLI` / remote-cli PATH refresh in tmux; its `GIT_ASKPASS` refresh is dropped once git uses SSH/gh.
+- **Shell**: fish launched from `.bashrc` via the existing interactive-TTY `exec fish` guard (login shell cannot be changed on directory-service accounts). Where the login shell is tcsh, a managed block appended at the end of `~/.tcshrc` (or `~/.cshrc` when only that exists) does the same; the rest of that file, such as EDA tool setup, is never touched. fisher plugins: fisher, z, sponge, autopair, fzf.fish, tide v6; tide settings captured. `vscode_remote_env.fish` kept for `VSCODE_IPC_HOOK_CLI` / remote-cli PATH refresh in tmux; its `GIT_ASKPASS` refresh is dropped once git uses SSH/gh.
 - **CLI tools env** (`cli-tools`, conda-forge via micromamba on Linux; Homebrew on macOS; winget where applicable on Windows): fish, tmux (when the system lacks one), fzf, fd, bat, ripgrep, jq, gh, git-lfs. Optional `pdftools` env (poppler), installed by default. micromamba `base` left empty.
 - **tmux**: current `~/.tmux.conf` (prefix C-a, mouse, 100k history, VS Code env pass-through).
-- **Node**: fnm, default Node 22 LTS; old tarball Node and empty `~/.nvm` dropped.
+- **Node**: fnm, default Node 24 LTS; old tarball Node and `~/.nvm` are left in place by apply and removed by `bin/cleanup`.
 - **uv**: standalone install; uv tools from the Manifest (semble[mcp], graphifyy[mcp], paper-search-mcp).
 - **git**: identity, LFS filter, global ignore; gh installed; SSH key generated with `ssh-keygen -t ed25519`, public key printed with the link https://github.com/settings/ssh/new, Bootstrap waits and verifies with `ssh -T git@github.com`.
 - **SSH**: committed public keys merged into `authorized_keys` (never overwriting existing lines); private keys never leave a machine. Desktop `~/.ssh/config` and WezTerm SSH domains generated from a Bitwarden item holding host aliases, addresses and usernames.
