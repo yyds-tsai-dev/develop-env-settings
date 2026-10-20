@@ -5,6 +5,9 @@ README.md
 .config/git
 .tmux.conf
 .condarc
+.bashrc
+.tcshrc
+.cshrc
 .codex
 {{ end }}
 {{ if not .isDesktop }}

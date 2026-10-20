@@ -22,6 +22,10 @@
 {{-     $fstype = output "stat" "-f" "-c" "%T" .chezmoi.homeDir | trim -}}
 {{-   end -}}
 {{- end -}}
+{{- $hold := false -}}
+{{- if stat (joinPath .chezmoi.homeDir ".config" "develop-env" "hold") -}}
+{{-   $hold = true -}}
+{{- end -}}
 {{- $sharedHome := and (eq $os "linux") (or (eq $fstype "nfs") (eq $fstype "nfs4")) -}}
 [data]
     role = {{ $role | quote }}
@@ -29,3 +33,4 @@
     isDesktop = {{ or (eq $role "desktop") (eq $role "desktop+server") }}
     sharedHome = {{ $sharedHome }}
     ci = {{ $ci }}
+    hold = {{ $hold }}

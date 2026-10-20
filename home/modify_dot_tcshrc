@@ -1,0 +1,23 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* Existing content is kept byte for byte; one managed block is replaced or appended at the end. Nothing is created when the file is absent. */ -}}
+{{- $active := stat (joinPath .chezmoi.destDir ".tcshrc") -}}
+{{- $in := .chezmoi.stdin -}}
+{{- $block := `# >>> develop-env >>>
+# Managed by develop-env-settings; edit the repo, not this block.
+if ("$path[1]" != "$HOME/.local/bin") set path = ($HOME/.local/bin $path)
+if ($?prompt) then
+    tty -s
+    if ($status == 0) then
+        where fish >& /dev/null
+        if ($status == 0) exec fish
+    endif
+endif
+# <<< develop-env <<<
+` -}}
+{{- if $active -}}
+{{-   $in = regexReplaceAll "(?s)# >>> develop-env >>>\n.*?# <<< develop-env <<<\n" $in "" -}}
+{{-   if and $in (not (hasSuffix "\n" $in)) }}{{ $in = printf "%s\n" $in }}{{ end -}}
+{{-   print $in $block -}}
+{{- else -}}
+{{-   $in -}}
+{{- end -}}
