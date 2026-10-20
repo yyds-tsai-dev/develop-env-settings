@@ -4,8 +4,8 @@
 {{- if not (has $role (list "server" "desktop" "desktop+server")) -}}
 {{-   fail (printf "unknown role %q" $role) -}}
 {{- end -}}
-{{- if and (eq $role "server") (not (or (eq $os "linux") (eq $os "darwin"))) -}}
-{{-   fail "server role needs linux or darwin" -}}
+{{- if and (eq $role "server") (ne $os "linux") -}}
+{{-   fail "server role needs linux" -}}
 {{- end -}}
 {{- if and (eq $role "desktop") (not (or (eq $os "windows") (eq $os "darwin"))) -}}
 {{-   fail "desktop role needs windows or darwin" -}}
