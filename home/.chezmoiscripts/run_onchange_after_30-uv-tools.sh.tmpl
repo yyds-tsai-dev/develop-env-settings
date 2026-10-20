@@ -1,0 +1,31 @@
+{{- if and .isServer (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+# Installs the manifest uv tools at their locked versions (executables land in
+# ~/.local/bin). A pin that fails is retried unpinned with a warning. Reruns when
+# a pin changes. Never aborts apply.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
+warn() { echo "warning: $*" >&2; }
+
+command -v uv >/dev/null 2>&1 || { warn "uv missing; skipping uv tools"; exit 0; }
+
+# Python 3.12: every tool's compiled dependencies ship wheels for it, while the
+# newest CPython often lacks them and the Server has no C compiler.
+PY=3.12
+
+# tool SPEC: SPEC is "<pkg>[extras]==<locked>" (or unpinned when the lock has no value)
+tool() {
+    uv tool install --quiet --python "$PY" "$1" && return 0
+    case "$1" in
+        *==*) warn "uv tool install $1 failed; retrying unpinned"
+              uv tool install --quiet --python "$PY" "${1%%==*}" && return 0 ;;
+    esac
+    warn "uv tool install ${1%%==*} failed"
+}
+{{  range .uv_tools }}
+{{- $v := index $.versions .name }}
+tool {{ if $v }}{{ printf "%s==%s" .spec $v | quote }}{{ else }}{{ .spec | quote }}{{ end }}
+{{- end }}
+exit 0
+{{- end }}

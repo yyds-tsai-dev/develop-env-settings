@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Machine-local steps. They write no managed dotfile, so they also run under a
+# hold file. Idempotent; a failing step warns and the script still exits 0.
+#   - known_hosts: github.com host keys merged into ~/.ssh/known_hosts
+#     (a key already present, under any host field, is not added again).
+set -u
+
+warn() { echo "warning: $*" >&2; }
+
+known_hosts_github() {
+  local kh="$HOME/.ssh/known_hosts" scanned host type key rest added=0
+  command -v ssh-keyscan >/dev/null 2>&1 || { warn "ssh-keyscan not found; github.com not added to known_hosts"; return 0; }
+  scanned="$(ssh-keyscan -T 10 -t ed25519,ecdsa,rsa github.com 2>/dev/null)"
+  [ -n "$scanned" ] || { warn "ssh-keyscan github.com failed; known_hosts unchanged"; return 0; }
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  if [ ! -e "$kh" ]; then : > "$kh" && chmod 644 "$kh"; fi
+  # Keep the last existing line intact when it lacks a newline.
+  if [ -s "$kh" ] && [ -n "$(tail -c 1 "$kh")" ]; then echo >> "$kh"; fi
+  while read -r host type key rest; do
+    case "$host" in ''|\#*) continue ;; esac
+    [ -n "$key" ] || continue
+    grep -qF -- " $type $key" "$kh" && continue
+    printf '%s %s %s\n' "$host" "$type" "$key" >> "$kh"
+    added=$((added + 1))
+  done <<EOT
+$scanned
+EOT
+  [ "$added" -eq 0 ] || echo "known_hosts: added $added github.com key(s)"
+}
+
+known_hosts_github
+exit 0

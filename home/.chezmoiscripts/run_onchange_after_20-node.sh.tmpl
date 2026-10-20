@@ -1,0 +1,41 @@
+{{- if and .isServer (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+# Installs fnm (locked version) into ~/.local/bin, then Node {{ .node.major }} as the
+# fnm default. Old Node installs (~/.nvm, ~/.local/node-v*) are left alone;
+# bin/cleanup removes them. Never aborts apply.
+# fnm ships only a .zip and the Server has no unzip, so uv's Python extracts it.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+FNM="$HOME/.local/bin/fnm"
+FNM_VERSION="{{ index .versions "fnm" }}"
+
+warn() { echo "warning: $*" >&2; }
+
+if [ "$("$FNM" --version 2>/dev/null)" != "fnm $FNM_VERSION" ]; then
+    tmp="$(mktemp -d)"
+    url="https://github.com/Schniz/fnm/releases/download/v$FNM_VERSION/fnm-linux.zip"
+    if curl -fsSL --retry 3 -o "$tmp/fnm.zip" "$url"; then
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -q -o "$tmp/fnm.zip" -d "$tmp/x"
+        else
+            uv run --no-project --python 3.12 -- python -I -c \
+                'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+                "$tmp/fnm.zip" "$tmp/x"
+        fi
+        if [ -f "$tmp/x/fnm" ]; then
+            mkdir -p "$HOME/.local/bin"
+            chmod 0755 "$tmp/x/fnm" && mv -f "$tmp/x/fnm" "$FNM"
+        else
+            warn "could not extract fnm $FNM_VERSION"
+        fi
+    else
+        warn "could not download fnm $FNM_VERSION"
+    fi
+    rm -rf "$tmp"
+fi
+[ -x "$FNM" ] || { warn "fnm missing; skipping Node"; exit 0; }
+
+fnm install {{ .node.major }} || { warn "fnm install {{ .node.major }} failed"; exit 0; }
+fnm default {{ .node.major }} || warn "fnm default {{ .node.major }} failed"
+exit 0
+{{- end }}

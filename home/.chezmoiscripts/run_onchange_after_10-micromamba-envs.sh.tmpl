@@ -1,0 +1,62 @@
+{{- if and .isServer (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+# Installs micromamba (locked version) into ~/.local/bin and the `cli-tools` and
+# `pdftools` envs from the manifest at their locked versions. Reruns when a pin
+# changes. Never removes an env: an existing env is installed into, not recreated.
+# A pin that fails to install is retried unpinned with a warning.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+MAMBA_ROOT_PREFIX="$HOME/micromamba"
+export MAMBA_ROOT_PREFIX
+MM="$HOME/.local/bin/micromamba"
+MM_VERSION="{{ index .versions "micromamba" }}"
+
+warn() { echo "warning: $*" >&2; }
+
+if [ "$("$MM" --version 2>/dev/null)" != "${MM_VERSION%-*}" ]; then
+    mkdir -p "$HOME/.local/bin"
+    if curl -fsSL --retry 3 -o "$MM.tmp" \
+        "https://github.com/mamba-org/micromamba-releases/releases/download/$MM_VERSION/micromamba-linux-64"; then
+        chmod 0755 "$MM.tmp" && mv -f "$MM.tmp" "$MM"
+    else
+        rm -f "$MM.tmp"
+        warn "could not download micromamba $MM_VERSION"
+    fi
+fi
+[ -x "$MM" ] || { warn "micromamba missing; skipping envs"; exit 0; }
+
+# mm_add ENV SPEC...: create ENV (if missing) or install into it.
+mm_add() {
+    env="$1"; shift
+    if [ -d "$MAMBA_ROOT_PREFIX/envs/$env" ]; then
+        "$MM" install -y -q -n "$env" -c conda-forge --override-channels "$@"
+    else
+        "$MM" create -y -q -n "$env" -c conda-forge --override-channels "$@"
+    fi
+}
+
+# ensure_env ENV SPEC...: all pins at once; on failure, each pin alone, then unpinned.
+ensure_env() {
+    env="$1"; shift
+    mm_add "$env" "$@" && return 0
+    warn "$env: locked install failed; retrying package by package"
+    for spec in "$@"; do
+        mm_add "$env" "$spec" && continue
+        pkg="${spec%%==*}"
+        warn "$env: $spec failed to install; retrying $pkg unpinned"
+        mm_add "$env" "$pkg" || warn "$env: $pkg failed to install"
+    done
+    return 0
+}
+{{  range $group := list "cli_tools" "pdftools" }}
+ensure_env {{ if eq $group "cli_tools" }}cli-tools{{ else }}pdftools{{ end }}
+{{- range (index $ $group) }}
+{{-   if or (not (hasKey . "platforms")) (has "linux" .platforms) }}
+{{-     $pkg := trimPrefix "conda-forge:" .source }}
+{{-     $v := index $.versions .name }} \
+    {{ if $v }}{{ printf "%s==%s" $pkg $v | quote }}{{ else }}{{ $pkg | quote }}{{ end }}
+{{-   end }}
+{{- end }}
+{{  end }}
+exit 0
+{{- end }}

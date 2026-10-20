@@ -21,7 +21,14 @@ jobs:
       - name: Set up tools
         run: tests/setup-tools.sh
       - name: bats
+        # bootstrap.bats skips itself off Linux; on ubuntu it runs in the docker step below.
+        env:
+          DEVENV_SKIP_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
         run: .tools/bin/bats tests/bats
+      - name: docker server bootstrap
+        if: runner.os == 'Linux'
+        timeout-minutes: 45
+        run: .tools/bin/bats -T tests/bats/bootstrap.bats
       - uses: astral-sh/setup-uv@v5
       - name: pytest
         run: |

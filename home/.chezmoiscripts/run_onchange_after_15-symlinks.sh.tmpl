@@ -1,0 +1,43 @@
+{{- if and .isServer (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+# Links ~/.local/bin/<tool> into the `cli-tools` and `pdftools` env bin/.
+# Only the executables of the manifest packages themselves are linked (from the
+# package's conda-meta file list), never their dependencies (bzip2, openssl,
+# ncurses tools, ...), which would shadow system tools on PATH.
+# An existing symlink is replaced; an existing regular file is left alone with a
+# warning. Reruns when a pin changes.
+MAMBA_ROOT_PREFIX="$HOME/micromamba"
+BIN="$HOME/.local/bin"
+mkdir -p "$BIN"
+
+warn() { echo "warning: $*" >&2; }
+
+# link_pkg ENV PKG [VERSION]
+link_pkg() {
+    env="$MAMBA_ROOT_PREFIX/envs/$1"
+    found=
+    for meta in "$env/conda-meta/$2"-[0-9]*.json; do
+        [ -f "$meta" ] || continue
+        found=1
+        for rel in $(grep -o '"bin/[^"/]*"' "$meta" | tr -d '"' | sort -u); do
+            name="${rel#bin/}"
+            [ -x "$env/$rel" ] || continue
+            if [ -e "$BIN/$name" ] && [ ! -L "$BIN/$name" ]; then
+                warn "$BIN/$name is a regular file; not replacing it with a link to $1"
+                continue
+            fi
+            ln -sfn "$env/$rel" "$BIN/$name"
+        done
+    done
+    [ -n "$found" ] || warn "$2 is not installed in env $1; nothing linked"
+}
+{{  range $group := list "cli_tools" "pdftools" }}
+{{- $env := "cli-tools" }}{{ if eq $group "pdftools" }}{{ $env = "pdftools" }}{{ end }}
+{{- range (index $ $group) }}
+{{-   if or (not (hasKey . "platforms")) (has "linux" .platforms) }}
+link_pkg {{ $env }} {{ trimPrefix "conda-forge:" .source }} {{ index $.versions .name | default "" | quote }}
+{{-   end }}
+{{- end }}
+{{- end }}
+exit 0
+{{- end }}
