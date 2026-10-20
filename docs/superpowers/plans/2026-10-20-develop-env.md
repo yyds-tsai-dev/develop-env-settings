@@ -373,6 +373,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
 
 **Files:**
 - Create:
+  - `bootstrap.ps1`: same flags and steps as `bootstrap.sh`; README one-liner `irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex`.
   - `home/dot_wezterm.lua.tmpl`:
     - Font `JetBrainsMono Nerd Font`.
     - One colour scheme, chosen by the implementer and named in a comment.
