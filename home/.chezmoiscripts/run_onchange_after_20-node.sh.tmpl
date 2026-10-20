@@ -37,5 +37,25 @@ fi
 
 fnm install {{ .node.major }} || { warn "fnm install {{ .node.major }} failed"; exit 0; }
 fnm default {{ .node.major }} || warn "fnm default {{ .node.major }} failed"
+
+# Link the default Node's node/npm/npx/corepack into ~/.local/bin so
+# non-interactive processes (Claude Code MCP servers via npx) find them ahead of
+# any system Node. Links go through fnm's `default` alias when it exists, so
+# they follow `fnm default`. An existing regular file is never replaced.
+bin="$(fnm exec --using=default -- sh -c 'dirname "$(command -v node)"' 2>/dev/null)"
+if [ -n "$bin" ] && [ -x "$bin/node" ]; then
+    alias_bin="${bin%%/node-versions/*}/aliases/default/bin"
+    [ -x "$alias_bin/node" ] && bin="$alias_bin"
+    for t in node npm npx corepack; do
+        [ -e "$bin/$t" ] || continue
+        if [ -e "$HOME/.local/bin/$t" ] && [ ! -L "$HOME/.local/bin/$t" ]; then
+            warn "$HOME/.local/bin/$t is a regular file; not replacing it with a link to fnm's $t"
+            continue
+        fi
+        ln -sfn "$bin/$t" "$HOME/.local/bin/$t"
+    done
+else
+    warn "fnm has no default Node; node/npm/npx not linked into ~/.local/bin"
+fi
 exit 0
 {{- end }}

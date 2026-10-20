@@ -114,6 +114,28 @@ EOF
   grep -q '1.39.0' "$f"
 }
 
+@test "node script links the fnm default node/npm/npx/corepack, never over a regular file" {
+  f="$(render run_onchange_after_20-node.sh.tmpl)"
+  fd="$H/.local/share/fnm"; v="$fd/node-versions/v24.0.0/installation/bin"
+  mkdir -p "$v" "$fd/aliases" "$H/.local/bin"
+  ln -s ../node-versions/v24.0.0/installation "$fd/aliases/default"
+  for t in node npm npx corepack; do printf '#!/bin/sh\n' > "$v/$t"; chmod +x "$v/$t"; done
+  printf '#!/bin/sh\ncase "$1" in\n  --version) echo "fnm 1.39.0" ;;\n  exec) shift 3; PATH="%s:$PATH" "$@" ;;\nesac\n' "$v" > "$H/.local/bin/fnm"
+  chmod +x "$H/.local/bin/fnm"
+  echo keep > "$H/.local/bin/corepack"
+  run env HOME="$H" PATH="/usr/bin:/bin" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for t in node npm npx; do
+    [ "$(readlink "$H/.local/bin/$t")" = "$fd/aliases/default/bin/$t" ]
+  done
+  [ "$(cat "$H/.local/bin/corepack")" = keep ]
+  [[ "$output" == *"corepack is a regular file"* ]]
+  run env HOME="$H" PATH="/usr/bin:/bin" sh "$f"   # idempotent
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$H/.local/bin/npx")" = "$fd/aliases/default/bin/npx" ]
+}
+
 @test "uv tools script installs the locked specs" {
   f="$(render run_onchange_after_30-uv-tools.sh.tmpl)"
   grep -q 'semble\[mcp\]==0.7.0' "$f"

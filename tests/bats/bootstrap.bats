@@ -65,6 +65,16 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   done
 }
 
+@test "npx works from a bare non-interactive PATH after bootstrap" {
+  run in_box "$BOOT >/tmp/b.log 2>&1 || { cat /tmp/b.log; echo 'bootstrap failed'; exit 1; }
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin npx --version && echo NPX-OK
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin node --version"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *NPX-OK* ]]
+  [[ "$output" == *v24.* ]]
+}
+
 @test "second bootstrap changes nothing" {
   run in_box "set -u
     $BOOT >/tmp/1.log 2>&1 || { cat /tmp/1.log; echo 'first bootstrap failed'; exit 1; }
@@ -139,9 +149,11 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
     grep -q '.nvm' /tmp/c1.log || { echo 'cleanup did not list ~/.nvm'; exit 1; }
     [ -e ~/.nvm/nvm.sh ] || { echo 'cleanup removed without yes'; exit 1; }
     \$cl --yes || { echo 'cleanup --yes failed'; exit 1; }
-    for p in ~/.nvm ~/.local/fish-env ~/.local/node-v20.0.0-linux-x64 ~/.local/node ~/.local/bin/node; do
+    for p in ~/.nvm ~/.local/fish-env ~/.local/node-v20.0.0-linux-x64 ~/.local/node; do
       { [ -e \"\$p\" ] || [ -L \"\$p\" ]; } && { echo \"cleanup kept \$p\"; exit 1; }
     done
+    # apply re-pointed ~/.local/bin/node at fnm's default; cleanup keeps that live link
+    case \"\$(readlink -f ~/.local/bin/node)\" in */fnm/*) ;; *) echo 'node link not on fnm'; exit 1 ;; esac
     ~/.local/bin/fish --version || { echo 'fish link broken after cleanup'; exit 1; }
     echo OLD-TOOLS-OK"
   echo "$output"
