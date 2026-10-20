@@ -39,3 +39,15 @@ setup() {
   [ "${#lines[@]}" -eq 10 ]
   [[ "${lines[0]}" == *"%0A# d15" ]]
 }
+
+@test "bootstrap annotations: one per doctor FAIL plus the bootstrap tail" {
+  cd "$BATS_TEST_TMPDIR"
+  printf 'PASS a\r\nFAIL b: broken\nWARN c: meh\n' > doctor.out
+  printf 'line %s\n' 1 2 3 > bootstrap.out
+  run "$BATS_TEST_DIRNAME/../ci-annotate-bootstrap.sh" "macOS bootstrap"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [ "${lines[0]}" = "::error title=macOS bootstrap::not ok doctor FAIL b%3A broken" ] || [ "${lines[0]}" = "::error title=macOS bootstrap::not ok doctor FAIL b: broken" ]
+  [[ "${lines[1]}" == *"not ok bootstrap output (last 15 lines)%0A# line 1%0A# line 2%0A# line 3" ]]
+}

@@ -227,6 +227,8 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   run in_box "$BOOT >/tmp/b.log 2>&1; echo \"boot-rc=\$?\"
     export PATH=\$HOME/.local/bin:\$PATH
     echo \"codex-version=\$(codex --version 2>/dev/null)\"
+    # bootstrap re-resolves the lock inside the container: compare with the lock it used
+    echo \"codex-lock=\$(sed -n 's/^  codex: *//p' ~/.local/share/chezmoi/home/.chezmoidata/versions.yaml)\"
     c=~/.codex/config.toml
     s1=\$(sha256sum \$c)
     d=\$(chezmoi diff --no-pager 2>/dev/null); [ -z \"\$d\" ] && echo DIFF-EMPTY || echo \"diff after bootstrap: \$d\"
@@ -248,7 +250,9 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
     ~/.local/share/chezmoi/bin/doctor --ci; echo \"doctor-rc=\$?\""
   echo "$output"
   [[ "$output" == *"boot-rc=0"* ]]
-  [[ "$output" == *"codex-version=codex-cli $(sed -n 's/^  codex: *//p' "$REPO_ROOT/home/.chezmoidata/versions.yaml")"* ]]
+  used="$(printf '%s\n' "$output" | sed -n 's/^codex-lock=//p')"
+  [ -n "$used" ]
+  [[ "$output" == *"codex-version=codex-cli $used"* ]]
   [[ "$output" == *DIFF-EMPTY* ]]
   [[ "$output" == *"rerun-rc=0"* ]]
   [[ "$output" == *CONFIG-STABLE* ]]

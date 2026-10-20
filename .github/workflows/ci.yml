@@ -67,3 +67,50 @@ jobs:
           else
             echo "no tests/py yet"
           fi
+
+  # Real Bootstraps on hosted runners; each must end with Doctor reporting no
+  # FAIL (WARN allowed). Failures become ::error annotations (tests/ci-annotate.sh).
+  macos-bootstrap:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: bootstrap desktop+server, then doctor --ci
+        run: |
+          set -o pipefail
+          rc=0
+          sh bootstrap.sh --source "$GITHUB_WORKSPACE" --role desktop+server --ci 2>&1 | tee bootstrap.out || rc=$?
+          PATH="$HOME/.local/bin:$PATH" bin/doctor --ci 2>&1 | tee doctor.out || rc=$?
+          exit "$rc"
+      - name: annotate failures
+        if: failure()
+        run: tests/ci-annotate-bootstrap.sh "macOS bootstrap"
+
+  windows-bootstrap:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      # Windows PowerShell, as the irm | iex one-liner runs; -File so the exit status propagates.
+      - name: bootstrap desktop, then doctor.ps1 -Ci
+        run: |
+          set -o pipefail
+          rc=0
+          powershell -NoProfile -ExecutionPolicy Bypass -File bootstrap.ps1 -Source "$GITHUB_WORKSPACE" -Role desktop -Ci 2>&1 | tee bootstrap.out || rc=$?
+          pwsh -NoProfile -File bin/doctor.ps1 -Ci 2>&1 | tee doctor.out || rc=$?
+          exit "$rc"
+      - name: annotate failures
+        if: failure()
+        run: tests/ci-annotate-bootstrap.sh "Windows bootstrap"
