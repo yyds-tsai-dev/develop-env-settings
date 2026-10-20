@@ -5,12 +5,13 @@
 #    bin/machine-local, exit 0.
 # 2. Resolve the Version lock (a failure keeps the committed lock).
 # 3. Warn, and continue, when the home is on network storage or the account has
-#    processes older than 10 minutes (other than shells, tmux, sshd, the VS Code
-#    server, claude, codex and this script's own process tree).
+#    processes older than 10 minutes (other than shells, tmux, sshd, session
+#    services, the VS Code server, claude, codex and this script's own tree).
 # 4. Back up every existing target `chezmoi status` reports as changing into
 #    ~/.dotfiles-backup-<YYYYmmdd-HHMMSS>/ (same relative paths).
+#    If `chezmoi status` fails, apply is skipped (nothing is written).
 # 5. chezmoi apply, bin/machine-local, bin/doctor. Exit status: 1 if apply
-#    failed, else Doctor's.
+#    failed or was skipped, else Doctor's.
 # Bash 3.2 compatible (macOS).
 set -u
 
@@ -19,8 +20,10 @@ APPLY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 warn() { echo "warning: $*" >&2; }
 
 # long_running_processes [SELF_PID]: print "<pid> <name>" for each process of this
-# user running longer than 10 minutes that is not exempt (see header) and not an
-# ancestor or descendant of SELF_PID (default: this shell). Prints nothing when
+# user running longer than 10 minutes that is not exempt and not an ancestor or
+# descendant of SELF_PID (default: this shell). Exempt: shells, tmux, sshd, and
+# (with everything below them) systemd, (sd-pam), ssh-agent, gpg-agent,
+# dbus-daemon, the VS Code server, claude and codex. Prints nothing when
 # ps is unavailable.
 long_running_processes() {
   local self="${1:-$$}" fmt=etimes table
@@ -51,28 +54,49 @@ long_running_processes() {
           if (!(q in desc) && (ppid[q] in desc)) { desc[q] = 1; changed = 1 }
         }
       } while (changed)
+      # Exempt by name. Session services and agents also exempt their whole
+      # subtree; shells, tmux and sshd do not (every user job descends from them).
       for (i = 1; i <= n; i++) {
         q = order[i]
-        if ((q in anc) || (q in desc) || et[q] < 600) continue
-        if (args[q] ~ /\.vscode-server/) continue
         split(args[q], w, " "); name = w[1]
         sub(/.*\//, "", name); sub(/^-/, "", name); sub(/:$/, "", name)
-        if (name ~ /^(bash|sh|dash|zsh|fish|tcsh|csh|ksh|tmux|sshd|claude|codex)$/) continue
-        print q, name
+        nm[q] = name
+        if (args[q] ~ /\.vscode-server/ || name ~ /^(systemd|\(sd-pam\)|ssh-agent|gpg-agent|dbus-daemon|claude|codex)$/) {
+          tree[q] = 1; ex[q] = 1
+        } else if (name ~ /^(bash|sh|dash|zsh|fish|tcsh|csh|ksh|tmux|sshd)$/) {
+          ex[q] = 1
+        }
+      }
+      for (i = 1; i <= n; i++) {
+        q = order[i]
+        if ((q in anc) || (q in desc) || (q in ex) || et[q] < 600) continue
+        p = ppid[q]; hops = 0; under = 0
+        while ((p in ppid) && hops++ < n) { if (p in tree) { under = 1; break }; p = ppid[p] }
+        if (under) continue
+        print q, nm[q]
       }
     }'
 }
 
 # backup_changed: copy existing targets that apply will change; print the dir.
+# Returns 1 (after a warning with chezmoi's stderr) when `chezmoi status` fails,
+# so the caller can skip apply: without a status nothing can be backed up.
 backup_changed() {
-  local status line path dir n=0
-  status="$(chezmoi status --exclude=scripts 2>/dev/null)" || status=
+  local status err line path dir n=0
+  err="$(mktemp)"
+  if ! status="$(chezmoi status --exclude=scripts 2>"$err")"; then
+    warn "chezmoi status failed, so nothing could be backed up: $(cat "$err")"
+    rm -f "$err"
+    return 1
+  fi
+  rm -f "$err"
   dir="$HOME/.dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     [ "${line:1:1}" != " " ] || continue
     path="${line:3}"
     [ -f "$HOME/$path" ] || [ -L "$HOME/$path" ] || continue
+    [ -d "$dir" ] || mkdir -m 700 "$dir" || { warn "could not create $dir"; return 1; }
     mkdir -p "$dir/$(dirname "$path")"
     cp -pP "$HOME/$path" "$dir/$path" || { warn "could not back up $HOME/$path"; continue; }
     n=$((n + 1))
@@ -112,14 +136,15 @@ apply_main() {
     warn "processes running for more than 10 minutes: $procs; applying anyway"
   fi
 
-  backup_changed
-
-  if [ -n "$ci" ]; then
+  if ! backup_changed; then
+    warn "skipping chezmoi apply: no file was written"
+    apply_rc=1
+  elif [ -n "$ci" ]; then
     chezmoi apply --force --no-tty || apply_rc=$?
   else
     chezmoi apply --force || apply_rc=$?
   fi
-  [ "$apply_rc" -eq 0 ] || echo "error: chezmoi apply failed (exit $apply_rc)" >&2
+  [ "$apply_rc" -eq 0 ] || echo "error: dotfiles not applied (exit $apply_rc)" >&2
 
   "$APPLY_ROOT/bin/machine-local"
 

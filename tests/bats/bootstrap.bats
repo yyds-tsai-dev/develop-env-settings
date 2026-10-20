@@ -20,6 +20,9 @@ setup_file() {
   export IMG=devenv-server-test
   docker build -q -t "$IMG" --build-arg UID="$(id -u)" \
     -f "$REPO_ROOT/tests/docker/Dockerfile.server" "$REPO_ROOT/tests/docker" >/dev/null
+  export IMG_TMUX=devenv-server-test-tmux
+  docker build -q -t "$IMG_TMUX" --build-arg UID="$(id -u)" --build-arg EXTRA_PKGS=tmux \
+    -f "$REPO_ROOT/tests/docker/Dockerfile.server" "$REPO_ROOT/tests/docker" >/dev/null
 
   export WORK; WORK="$(mktemp -d "${TMPDIR:-/tmp}/devenv-docker.XXXXXX")"
   mkdir -p "$WORK/repo"
@@ -37,7 +40,8 @@ setup_file() {
 
 teardown_file() { [ -n "${WORK:-}" ] && rm -rf "$WORK"; true; }
 
-# in_box [docker-run-option]... SCRIPT: run SCRIPT with bash as user dev.
+# in_box [docker-run-option]... SCRIPT: run SCRIPT with bash as user dev
+# (image $BOX_IMG, default $IMG).
 in_box() {
   local script="${*: -1}" opts=("${@:1:$#-1}")
   docker run --rm \
@@ -45,7 +49,7 @@ in_box() {
     -v "$CACHE/mamba-pkgs:/cache/mamba-pkgs" -v "$CACHE/uv:/cache/uv" \
     -e CONDA_PKGS_DIRS=/cache/mamba-pkgs -e UV_CACHE_DIR=/cache/uv \
     ${GITHUB_TOKEN:+-e GITHUB_TOKEN} \
-    "${opts[@]}" "$IMG" bash -c "$script" 2>&1
+    ${opts[@]+"${opts[@]}"} "${BOX_IMG:-$IMG}" bash -c "$script" 2>&1
 }
 
 no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
@@ -106,10 +110,14 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
 @test "apply backs up changed files" {
   run in_box "$BOOT >/tmp/b.log 2>&1; rc=\$?; cat /tmp/b.log
     cmp /etc/skel/.bashrc ~/.dotfiles-backup-*/.bashrc && echo BACKUP-OK
+    [ \"\$(stat -c %a ~/.dotfiles-backup-*)\" = 700 ] && echo BACKUP-MODE-OK
+    case \"\$(readlink ~/.local/bin/tmux)\" in */envs/cli-tools/bin/tmux) echo TMUX-ENV-OK ;; esac
     exit \$rc"
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == *BACKUP-OK* ]]
+  [[ "$output" == *BACKUP-MODE-OK* ]]
+  [[ "$output" == *TMUX-ENV-OK* ]]   # this image has no system tmux
   [[ "$output" == *"/.dotfiles-backup-"* ]]
 }
 
@@ -170,4 +178,17 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   [[ "$output" != *"bzip2 installed"* ]]
   [[ "$output" != *"sudo: not found"* ]]
   [[ "$output" != *"sudo: command not found"* ]]
+}
+
+@test "system tmux stays first on PATH; the env still has tmux" {
+  BOX_IMG="$IMG_TMUX" run in_box "$BOOT; rc=\$?
+    echo \"tmux-on-path=\$(PATH=\$HOME/.local/bin:\$PATH command -v tmux)\"
+    [ -x ~/micromamba/envs/cli-tools/bin/tmux ] && echo ENV-TMUX-OK
+    echo \"rc=\$rc\""
+  echo "$output"
+  [[ "$output" == *"rc=0"* ]]
+  [[ "$output" == *"tmux-on-path=/usr/bin/tmux"* ]]
+  [[ "$output" == *ENV-TMUX-OK* ]]
+  [[ "$output" == *"PASS tmux_version"* ]]
+  no_fail_lines
 }

@@ -14,19 +14,23 @@
 # --role: server | desktop | desktop+server (default on Linux: server; otherwise
 #   chezmoi asks once). --ci: CI=true (non-interactive; enables CI test hooks) and
 #   `bin/doctor --ci`.
+# curl, git and tar are required: when one is missing, the script prints the
+# apt command and exits 1 (nothing can work without them).
+# An existing clone is reused; with --source, a different origin URL is a warning.
 # POSIX sh (the one-liner pipes it to sh). Never uses sudo: missing system
 # packages are printed as commands. The body is one function so that `curl | sh`
 # has read the whole script before anything runs.
 
 bootstrap_main() {
     src=yyds-tsai-dev/develop-env-settings
+    src_given=
     role=
     ci=
     while [ $# -gt 0 ]; do
         case "$1" in
             --source) [ $# -ge 2 ] || { echo "error: --source needs a value" >&2; return 2; }
-                      src="$2"; shift 2 ;;
-            --source=*) src="${1#--source=}"; shift ;;
+                      src="$2"; src_given=1; shift 2 ;;
+            --source=*) src="${1#--source=}"; src_given=1; shift ;;
             --role) [ $# -ge 2 ] || { echo "error: --role needs a value" >&2; return 2; }
                     role="$2"; shift 2 ;;
             --role=*) role="${1#--role=}"; shift ;;
@@ -81,15 +85,20 @@ bootstrap_main() {
     fi
 
     wt="${XDG_DATA_HOME:-$HOME/.local/share}/chezmoi"
+    case "$src" in
+        /*|./*|../*|*://*|*@*:*) url="$src" ;;
+        */*) if [ -d "$src" ]; then url="$src"; else url="https://github.com/$src.git"; fi ;;
+        *) url="$src" ;;
+    esac
     if [ ! -e "$wt/.git" ]; then
-        case "$src" in
-            /*|./*|../*|*://*|*@*:*) url="$src" ;;
-            */*) if [ -d "$src" ]; then url="$src"; else url="https://github.com/$src.git"; fi ;;
-            *) url="$src" ;;
-        esac
         echo "cloning $url into $wt"
         mkdir -p "$(dirname "$wt")"
         git clone -q "$url" "$wt" || { echo "error: git clone $url failed" >&2; return 1; }
+    elif [ -n "$src_given" ]; then
+        origin="$(git -C "$wt" remote get-url origin 2>/dev/null)"
+        if [ "$origin" != "$url" ]; then
+            echo "warning: reusing existing clone $wt whose origin is ${origin:-unset}, not $url" >&2
+        fi
     fi
 
     if [ -n "$ci" ]; then notty=--no-tty; else notty=; fi

@@ -26,14 +26,28 @@ add "$HOME/.nvm"
 for d in "$HOME"/.local/node-v*; do add "$d"; done
 [ -L "$HOME/.local/node" ] && add "$HOME/.local/node"
 
+# Real directories among the candidates (plain files, e.g. a node-v*.tar.xz, are
+# removal targets themselves but never a prefix for matching links).
 dirs=()
 for p in ${found[@]+"${found[@]}"}; do
-  [ -L "$p" ] || dirs+=("$(cd "$p" 2>/dev/null && pwd -P)")
+  [ -d "$p" ] && [ ! -L "$p" ] || continue
+  d="$(cd "$p" 2>/dev/null && pwd -P)" && [ -n "$d" ] && [ "$d" != / ] && dirs+=("$d")
+done
+# Links into the current environment are never listed.
+live=()
+for d in "$HOME/micromamba/envs/cli-tools" "$HOME/micromamba/envs/pdftools" \
+         "${XDG_DATA_HOME:-$HOME/.local/share}/uv" "${XDG_DATA_HOME:-$HOME/.local/share}/fnm"; do
+  [ -d "$d" ] && live+=("$(cd "$d" && pwd -P)")
 done
 for l in "$HOME"/.local/bin/* "$HOME"/.local/bin/.[!.]*; do
   [ -L "$l" ] || continue
   if [ ! -e "$l" ]; then add "$l"; continue; fi
-  t="$(readlink -f "$l" 2>/dev/null)" || continue
+  t="$(readlink -f "$l" 2>/dev/null)" && [ -n "$t" ] || continue
+  keep=
+  for d in ${live[@]+"${live[@]}"}; do
+    case "$t" in "$d"/*) keep=1; break ;; esac
+  done
+  [ -z "$keep" ] || continue
   for d in ${dirs[@]+"${dirs[@]}"}; do
     case "$t" in "$d"/*) add "$l"; break ;; esac
   done

@@ -200,3 +200,101 @@ EOF
     [[ "$output" == *"$c"* ]]
   done
 }
+
+@test "cleanup: plain files matching the globs are targets, live env links survive" {
+  e="$H/micromamba/envs/cli-tools"; u="$H/.local/share/uv/tools/semble/bin"
+  mkdir -p "$H/.local/bin" "$e/bin" "$u"
+  : > "$H/.local/node-v20.11.0-linux-x64.tar.xz"
+  : > "$H/.nvm"
+  : > "$e/bin/rg"; : > "$u/semble"
+  ln -s "$e/bin/rg" "$H/.local/bin/rg"
+  ln -s "$u/semble" "$H/.local/bin/semble"
+  run env HOME="$H" bash -c 'echo n | "$1"' _ "$REPO_ROOT/bin/cleanup"
+  echo "$output"
+  [[ "$output" == *"node-v20.11.0-linux-x64.tar.xz"* ]]
+  [[ "$output" == *"/.nvm"* ]]
+  [[ "$output" != *".local/bin/rg"* ]]
+  [[ "$output" != *".local/bin/semble"* ]]
+  run env HOME="$H" "$REPO_ROOT/bin/cleanup" --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$H/.local/node-v20.11.0-linux-x64.tar.xz" ] && [ ! -e "$H/.nvm" ]
+  [ -L "$H/.local/bin/rg" ] && [ -e "$H/.local/bin/rg" ]
+  [ -L "$H/.local/bin/semble" ] && [ -e "$H/.local/bin/semble" ]
+}
+
+@test "apply: failing chezmoi status skips apply and exits non-zero" {
+  src="$H/.local/share/chezmoi"; mkdir -p "$src"
+  (cd "$REPO_ROOT" && git ls-files -co --exclude-standard -z \
+    | while IFS= read -r -d '' f; do [ -e "$f" ] && printf '%s\0' "$f"; done \
+    | tar --null -T - -cf -) | tar -xf - -C "$src"
+  printf '{{ fail "deliberately broken" }}\n' > "$src/home/dot_broken.tmpl"
+  stub uv 'exit 0'
+  stub ssh-keyscan 'exit 1'
+  run env -i HOME="$H" CI=true PATH="$STUB:$REPO_ROOT/.tools/bin:/usr/bin:/bin" \
+    "$REPO_ROOT/.tools/bin/chezmoi" init --promptChoice role=server --no-tty
+  [ "$status" -eq 0 ]
+  run env -i HOME="$H" CI=true PATH="$STUB:$REPO_ROOT/.tools/bin:/usr/bin:/bin" \
+    bash "$src/lib/apply.sh" --ci
+  echo "$output"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"warning: chezmoi status failed"*"deliberately broken"* ]]
+  [[ "$output" == *"skipping chezmoi apply"* ]]
+  [ ! -e "$H/.bashrc" ] && [ ! -e "$H/.tmux.conf" ] && [ ! -e "$H/.config/fish" ]
+  [[ "$output" == *"PASS chezmoi_present"* ]]   # doctor still ran
+}
+
+@test "symlinks script leaves a system tmux first, links the env tmux otherwise" {
+  f="$(render run_onchange_after_15-symlinks.sh.tmpl)"
+  e="$H/micromamba/envs/cli-tools"; mkdir -p "$e/bin" "$e/conda-meta"
+  printf '#!/bin/sh\n' > "$e/bin/tmux"; chmod +x "$e/bin/tmux"
+  printf '{"files": ["bin/tmux"]}\n' > "$e/conda-meta/tmux-3.8_-h0_0.json"
+  # A PATH with only the tools the script needs (no tmux anywhere).
+  tb="$SB/toolbox"; mkdir -p "$tb"
+  for t in sh grep tr sort readlink ln rm mkdir cat; do ln -s "$(command -v "$t")" "$tb/$t"; done
+  run env -i HOME="$H" PATH="$H/.local/bin:$tb" sh "$f"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$H/.local/bin/tmux")" = "$e/bin/tmux" ]
+  stub tmux 'echo system tmux'
+  run env -i HOME="$H" PATH="$H/.local/bin:$STUB:$tb" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$H/.local/bin/tmux" ] && [ ! -L "$H/.local/bin/tmux" ]
+  [[ "$output" == *"system tmux found"* ]]
+}
+
+@test "long-running process filter exempts children of session services and agents only" {
+  cat > "$STUB/ps" <<'EOF2'
+#!/bin/sh
+cat <<'T'
+  300     1  9000 /lib/systemd/systemd --user
+  301   300  9000 (sd-pam)
+  302   300  9000 /usr/bin/pipewire
+  310     1  9000 ssh-agent -s
+  311     1  9000 /home/x/.local/bin/claude
+  312   311  9000 python3 tool_job.py
+  320     1  9000 tmux new -s main
+  321   320  9000 -bash
+  322   321  9000 python3 train.py
+T
+EOF2
+  chmod +x "$STUB/ps"
+  run env PATH="$STUB:/usr/bin:/bin" bash -c '. "$1"; long_running_processes 999' _ "$REPO_ROOT/lib/apply.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "322 python3" ]
+}
+
+@test "bootstrap warns when an existing clone's origin differs from --source" {
+  stub uv 'exit 0'
+  stub chezmoi 'exit 7'   # stop right after the clone step
+  wt="$H/.local/share/chezmoi"; mkdir -p "$wt"
+  git -C "$wt" init -q && git -C "$wt" remote add origin /elsewhere
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --source /repo --role server --ci
+  echo "$output"
+  [[ "$output" == *"warning: reusing existing clone"*"/elsewhere"*"/repo"* ]]
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --source /elsewhere --role server --ci
+  [[ "$output" != *"warning: reusing"* ]]
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --role server --ci
+  [[ "$output" != *"warning: reusing"* ]]
+}
