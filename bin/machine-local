@@ -3,6 +3,7 @@
 # hold file. Idempotent; a failing step warns and the script still exits 0.
 #   - known_hosts: github.com host keys merged into ~/.ssh/known_hosts
 #     (a key already present, under any host field, is not added again).
+#   - GitHub SSH key: lib/ssh-key.sh (creates ~/.ssh/id_ed25519 once, checks GitHub).
 set -u
 
 warn() { echo "warning: $*" >&2; }
@@ -29,4 +30,5 @@ EOT
 }
 
 known_hosts_github
+bash "$(dirname "${BASH_SOURCE[0]}")/../lib/ssh-key.sh" "$@" || warn "ssh key step failed"
 exit 0

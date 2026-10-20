@@ -1,0 +1,2 @@
+#!/bin/sh
+exec uv run --script {{ .chezmoi.workingTree }}/lib/merge_authorized_keys.py {{ .chezmoi.workingTree }}/ssh/authorized_keys.pub-list

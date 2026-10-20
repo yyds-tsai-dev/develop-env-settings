@@ -118,7 +118,7 @@ apply_main() {
   if [ -e "$HOME/.config/develop-env/hold" ] \
      || [ "$(chezmoi execute-template '{{ .hold }}' 2>/dev/null)" = true ]; then
     echo "hold file present: not applying dotfiles"
-    "$APPLY_ROOT/bin/machine-local"
+    "$APPLY_ROOT/bin/machine-local" $ci
     return 0
   fi
 
@@ -146,7 +146,7 @@ apply_main() {
   fi
   [ "$apply_rc" -eq 0 ] || echo "error: dotfiles not applied (exit $apply_rc)" >&2
 
-  "$APPLY_ROOT/bin/machine-local"
+  "$APPLY_ROOT/bin/machine-local" $ci
 
   "$APPLY_ROOT/bin/doctor" $ci || doctor_rc=$?
   [ "$apply_rc" -eq 0 ] || return 1

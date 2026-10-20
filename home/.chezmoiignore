@@ -1,6 +1,7 @@
 {{- /* Server-only paths are ignored unless .isServer; Desktop-only unless .isDesktop. */ -}}
 README.md
 {{ if not .isServer }}
+.ssh/authorized_keys
 .config/fish
 .config/git
 .tmux.conf

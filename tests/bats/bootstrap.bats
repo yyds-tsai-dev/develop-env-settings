@@ -192,3 +192,21 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   [[ "$output" == *"PASS tmux_version"* ]]
   no_fail_lines
 }
+
+@test "ssh key created once" {
+  run in_box "$BOOT; rc=\$?
+    fp1=\$(ssh-keygen -lf ~/.ssh/id_ed25519.pub)
+    echo \"fp1=\$fp1\"
+    sh /repo/bootstrap.sh --source /repo --role server --ci >/tmp/2.log 2>&1
+    fp2=\$(ssh-keygen -lf ~/.ssh/id_ed25519.pub)
+    [ \"\$fp1\" = \"\$fp2\" ] && echo KEY-UNCHANGED
+    echo \"modes=\$(stat -c %a ~/.ssh) \$(stat -c %a ~/.ssh/authorized_keys)\"
+    echo \"rc=\$rc\""
+  echo "$output"
+  [[ "$output" == *"rc=0"* ]]
+  [[ "$output" == *"PASS ssh_key"* ]]
+  [[ "$output" == *"SKIP github_ssh_auth"* ]]
+  [[ "$output" == *KEY-UNCHANGED* ]]
+  [[ "$output" == *"modes=700 600"* ]]
+  no_fail_lines
+}
