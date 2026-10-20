@@ -22,19 +22,18 @@ chezmoi_iso() {
     --persistent-state "$SB_STATE" --source "$REPO_ROOT" "$@"
 }
 
-# init_role ROLE OS: write the isolated config via `chezmoi init`.
-# OS is accepted for interface parity; chezmoi derives .chezmoi.os from the
-# host, so role/OS mismatches are exercised only for the host OS.
+# init_role ROLE: write the isolated config via `chezmoi init`.
+# chezmoi derives .chezmoi.os from the host, so tests skip on non-matching hosts.
 init_role() {
   local role="$1"
   chezmoi_iso init --promptChoice "role=$role" --no-tty </dev/null
 }
 
-# render_home ROLE OS: apply (no scripts) into a temp destination and echo it.
+# render_home ROLE: apply (no scripts) into a temp destination and echo it.
 render_home() {
-  local role="$1" os="${2:-}"
+  local role="$1"
   new_sandbox
-  init_role "$role" "$os" >&2 || return 1
+  init_role "$role" >&2 || return 1
   chezmoi_iso apply --exclude scripts --destination "$SB_DEST" >&2 || return 1
   echo "$SB_DEST"
 }

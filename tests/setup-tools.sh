@@ -35,7 +35,9 @@ if [ ! -x "$TOOLS/bin/chezmoi$exe" ]; then
   url="https://github.com/twpayne/chezmoi/releases/download/$tag/chezmoi_${ver}_${os}_${arch}.$ext"
   curl -fsSL "$url" -o "$tmp/chezmoi.$ext"
   if [ "$ext" = zip ]; then
-    unzip -q -o "$tmp/chezmoi.zip" chezmoi.exe -d "$tmp/x"
+    mkdir -p "$tmp/x"
+    tar -xf "$tmp/chezmoi.zip" -C "$tmp/x" chezmoi.exe 2>/dev/null \
+      || powershell -NoProfile -Command "Expand-Archive -Force -Path '$(cygpath -w "$tmp/chezmoi.zip")' -DestinationPath '$(cygpath -w "$tmp/x")'"
   else
     mkdir -p "$tmp/x"
     tar -xzf "$tmp/chezmoi.$ext" -C "$tmp/x" chezmoi

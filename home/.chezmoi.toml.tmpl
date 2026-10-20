@@ -1,6 +1,9 @@
 {{- /* Prompt text must be exactly "role" so --promptChoice role=... matches. */ -}}
 {{- $role := promptChoiceOnce . "role" "role" (list "server" "desktop" "desktop+server") -}}
 {{- $os := .chezmoi.os -}}
+{{- if not (has $role (list "server" "desktop" "desktop+server")) -}}
+{{-   fail (printf "unknown role %q" $role) -}}
+{{- end -}}
 {{- if and (eq $role "server") (not (or (eq $os "linux") (eq $os "darwin"))) -}}
 {{-   fail "server role needs linux or darwin" -}}
 {{- end -}}
