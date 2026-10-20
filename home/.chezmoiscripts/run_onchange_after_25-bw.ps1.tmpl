@@ -2,12 +2,17 @@
 # Installs the Bitwarden CLI (bw {{ index .versions "bw" }}) from the official release zip into
 # ~/.local/bin (no admin). As on Linux, the first apply on a new machine runs
 # before bw exists, so Secret files are skipped with a warning; run `bw login`,
-# `$env:BW_SESSION = bw unlock --raw`, then apply again. Never aborts apply.
+# `$env:BW_SESSION = bw unlock --raw`, `bw sync`, then apply again. Never aborts apply.
 $ErrorActionPreference = 'Continue'
 $version = '{{ index .versions "bw" }}'
 $bin = Join-Path $HOME '.local/bin'
 $exe = Join-Path $bin 'bw.exe'
 try {
+    # Ensure the bin dir is on the user PATH (idempotent) so lookPath finds bw.exe next session.
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ((($userPath -split ';') | Where-Object { $_ -eq $bin }).Count -eq 0) {
+        [Environment]::SetEnvironmentVariable('Path', ((@($userPath, $bin) | Where-Object { $_ }) -join ';'), 'User')
+    }
     if ((Test-Path $exe) -and ((& $exe --version 2>$null) -eq $version)) { exit 0 }
     New-Item -ItemType Directory -Force -Path $bin | Out-Null
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("bw-" + [guid]::NewGuid())

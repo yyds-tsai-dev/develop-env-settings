@@ -4,7 +4,7 @@
 # Runs after the Node script (20-node), so it is listed as after_25.
 # Consequence: on the very first apply on a new machine bw is not installed
 # yet when templates render, so Secret files are skipped with a warning. Then
-# run `bw login`, `export BW_SESSION=$(bw unlock --raw)` and apply again.
+# run `bw login`, `export BW_SESSION=$(bw unlock --raw)`, `bw sync` and apply again.
 # Warns and exits 0 on any failure; never aborts apply.
 PATH="$HOME/.local/bin:$PATH"
 export PATH

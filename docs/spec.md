@@ -56,14 +56,14 @@ Steps that need admin rights (system packages, Homebrew's first install, elevate
 
 ## Secrets
 
-Bitwarden Password Manager (free tier), folder `develop-env-settings`, one item per Secret, read with the official `bw` CLI through the shared `bw-field` template (it calls `bw status` and `bw list` only when `bw` is on PATH and the vault is `unlocked`, so it never prompts or hangs). Locked or missing: Secret-bearing files render empty (chezmoi creates nothing), the template calls `warnf "Bitwarden locked or missing: skipping <file>"`, and everything else applies; rerun after unlock.
+Bitwarden Password Manager (free tier), folder `develop-env-settings`, one item per Secret, read with the official `bw` CLI through the shared `bw-field` template (it calls `bw status` and `bw list` only when `bw` is on PATH and the vault is `unlocked`, so it never prompts or hangs). Locked, missing, failing or incomplete: Secret-bearing targets are listed in `home/.chezmoiignore` behind the `bw-ready` guard, which calls `warnf "Bitwarden locked or missing: skipping <file>"` once per target. Ignored targets are left untouched (an existing file is never removed by an empty render); everything else applies; rerun after unlock.
 
 Items:
 
 - `paper-search`: custom fields `ieee_api_key` and `unpaywall_email`. Rendered to `~/.config/paper-search-mcp/.env` (mode 600) as `PAPER_SEARCH_MCP_IEEE_API_KEY` and `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL`.
 - `ssh-hosts`: the note is JSON, a list of `{alias, hostname, user, port}`.
 
-`bw` is installed by an `after` script (`25-bw`) that needs Node: `npm install -g @bitwarden/cli@<locked version>` through fnm's Node on Linux and macOS, the official release zip into the user's bin dir on Windows. Consequence: on the very first apply on a new machine `bw` is not installed yet when templates render, so Secret files are skipped with a warning; the person then runs `bw login`, `export BW_SESSION=$(bw unlock --raw)` and applies again. Claude Code and Codex logins are manual steps listed by Bootstrap and checked by Doctor.
+`bw` is installed by an `after` script (`25-bw`) that needs Node: `npm install -g @bitwarden/cli@<locked version>` through fnm's Node on Linux and macOS, the official release zip into the user's bin dir on Windows. Consequence: on the very first apply on a new machine `bw` is not installed yet when templates render, so Secret files are skipped with a warning; the person then runs `bw login`, `export BW_SESSION=$(bw unlock --raw)`, `bw sync` and applies again. Claude Code and Codex logins are manual steps listed by Bootstrap and checked by Doctor.
 
 ## Agent-runnable
 

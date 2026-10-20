@@ -82,6 +82,37 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   [ ! -e "$SB_DEST/$ENVFILE" ]
 }
 
+@test "locked re-apply leaves an existing secret file byte-identical, one warning" {
+  stub_bw unlocked
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  before="$(sha256sum "$SB_DEST/$ENVFILE")"
+  stub_bw locked
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$SB_DEST/$ENVFILE")" = "$before" ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+}
+
+@test "bw that exits non-zero counts as locked: warning, exit 0" {
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/bw"; chmod +x "$STUB/bw"
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  [ ! -e "$SB_DEST/$ENVFILE" ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+}
+
+@test "unlocked but field missing: existing file untouched, one warning" {
+  stub_bw unlocked
+  apply_with "$STUB"
+  before="$(sha256sum "$SB_DEST/$ENVFILE")"
+  sed -i 's/unpaywall_email/other_field/' "$STUB/bw"
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$SB_DEST/$ENVFILE")" = "$before" ]
+  [ "$(grep -c 'not found' <<<"$output")" -eq 1 ]
+}
+
 @test "no secret values are committed in the repo" {
   ! git -C "$REPO_ROOT" grep -qE 'FAKE-IEEE-KEY|BW_SESSION=[A-Za-z0-9+/=]{20,}' -- home lib doctor.d
 }

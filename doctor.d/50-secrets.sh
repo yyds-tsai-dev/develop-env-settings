@@ -13,10 +13,12 @@ check_bw_unlocked() {
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "secret check skipped in --ci"; return 2; fi
   command -v bw >/dev/null 2>&1 || { echo "bw not installed"; return 1; }
   st="$(bw status 2>/dev/null)"
-  case "$st" in
-    *'"status":"unlocked"'*) return 0 ;;
-  esac
-  echo "vault not unlocked: bw login; export BW_SESSION=\$(bw unlock --raw); apply again"
+  if command -v jq >/dev/null 2>&1; then
+    [ "$(printf '%s' "$st" | jq -r .status 2>/dev/null)" = unlocked ] && return 0
+  elif command -v python3 >/dev/null 2>&1; then
+    printf '%s' "$st" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("status")=="unlocked" else 1)' 2>/dev/null && return 0
+  fi
+  echo "vault not unlocked: bw login; export BW_SESSION=\$(bw unlock --raw); bw sync; apply again"
   return 1
 }
 register check_bw_unlocked
