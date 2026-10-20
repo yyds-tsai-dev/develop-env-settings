@@ -1,0 +1,8 @@
+cli_tools: []
+pdftools: []
+uv_tools: []
+node: { major: 22 }
+mcp: []
+claude: { marketplaces: [], plugins: [] }
+codex: { skill_bundles: [] }
+installers: []

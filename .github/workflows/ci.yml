@@ -1,0 +1,32 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up tools
+        run: tests/setup-tools.sh
+      - name: bats
+        run: .tools/bin/bats tests/bats
+      - name: pytest
+        run: |
+          if [ -d tests/py ]; then
+            python3 -m pip install pytest pyyaml
+            python3 -m pytest tests/py
+          else
+            echo "no tests/py yet"
+          fi

@@ -1,0 +1,12 @@
+{{- /* Server-only paths are ignored unless .isServer; Desktop-only unless .isDesktop. */ -}}
+README.md
+{{ if not .isServer }}
+.config/fish
+.config/git
+.tmux.conf
+.condarc
+.codex
+{{ end }}
+{{ if not .isDesktop }}
+.config/desktop
+{{ end }}

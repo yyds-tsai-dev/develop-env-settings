@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Doctor: runs every doctor.d/*.sh check. Usage: bin/doctor [--ci]
+# Output per check: PASS <name> | FAIL <name>: <reason> | SKIP <name>: <reason>
+# Exit status 1 if any check FAILs. --ci turns login and Secret checks into SKIP.
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export DOCTOR_ROOT="$ROOT"
+DOCTOR_CI=0
+[ "${1:-}" = "--ci" ] && DOCTOR_CI=1
+export DOCTOR_CI
+
+DOCTOR_CHECKS=()
+register() { DOCTOR_CHECKS+=("$1"); }
+pass() { echo "PASS $1"; }
+fail() { echo "FAIL $1: $2"; DOCTOR_FAILED=1; }
+skip() { echo "SKIP $1: $2"; }
+
+# Checks call: check_x() { ...; return 0 on pass; print reason and return 1 on
+# fail; print reason and return 2 on skip. }
+DOCTOR_FAILED=0
+for f in "$ROOT"/doctor.d/*.sh; do
+  [ -e "$f" ] && . "$f"
+done
+
+for name in "${DOCTOR_CHECKS[@]}"; do
+  label="${name#check_}"
+  reason="$("$name" 2>&1)"; rc=$?
+  case "$rc" in
+    0) pass "$label" ;;
+    2) skip "$label" "$reason" ;;
+    *) fail "$label" "$reason" ;;
+  esac
+done
+
+[ "$DOCTOR_FAILED" -eq 0 ]
