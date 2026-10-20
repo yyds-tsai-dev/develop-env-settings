@@ -63,10 +63,65 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   done
   ! grep -qF '"claude-plugins-official": {' "$f"
   grep -qF '"repo": "JuliusBrussee/caveman"' "$f"
-  # hooks and statusLine use $HOME, never an absolute path
+  # hooks use $HOME, never an absolute path; no statusline release locked and no
+  # binary: no statusLine (Claude would run a missing command)
   grep -qF '"command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\""' "$f"
-  grep -qF '"command": "\"$HOME/.claude/statusline-bin\""' "$f"
+  if [ -z "$(lock statusline)" ]; then ! grep -q statusLine "$f"; fi
   ! grep -qE '/home/|/ldaphome|/Users/' "$f"
+}
+
+@test "statusLine renders once a statusline release is locked or the binary exists" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  init_role server >&2
+  t='{{ template "claude-settings.json" . }}'
+  run chezmoi_iso execute-template "{{ \$_ := unset .versions \"statusline\" }}$t"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *statusLine* ]]
+  printf '%s\n' "$output" > "$SB/none.json"; json_ok "$SB/none.json"
+  run chezmoi_iso execute-template "{{ \$_ := set .versions \"statusline\" \"1.0.0\" }}$t"
+  [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin\""'* ]]
+  printf '%s\n' "$output" > "$SB/lock.json"; json_ok "$SB/lock.json"
+  mkdir -p "$SB_HOME/.claude"; : > "$SB_HOME/.claude/statusline-bin"   # a local build
+  run chezmoi_iso execute-template "{{ \$_ := unset .versions \"statusline\" }}$t"
+  [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin\""'* ]]
+  printf '%s\n' "$output" > "$SB/built.json"; json_ok "$SB/built.json"
+}
+
+@test "plain desktop gets no Claude Code: install script empty, ~/.claude ignored" {
+  init_role server >&2
+  sed -e 's/^\( *role = \).*/\1"desktop"/' -e 's/^\( *isServer = \).*/\1false/' \
+      -e 's/^\( *isDesktop = \).*/\1true/' "$SB_CONFIG" > "$SB/cfg.new"
+  cat "$SB/cfg.new" > "$SB_CONFIG"
+  for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl; do
+    sed 's/\.chezmoi\.os/"darwin"/g' "$REPO_ROOT/home/.chezmoiscripts/$s" | chezmoi_iso execute-template > "$SB/out"
+    [ -z "$(tr -d '[:space:]' < "$SB/out")" ] || { echo "$s renders on a plain desktop"; false; }
+  done
+  run chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiignore"
+  for p in .claude .codex .config/paper-search-mcp; do printf '%s\n' "$output" | grep -qx "$p"; done
+}
+
+@test "install script leaves a retry marker on failure and removes it after a clean run" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  grep -q '^# retry: $' "$f"
+  m="$SB_HOME/.local/state/develop-env/retry/50-claude"
+  stub curl 'exit 22'
+  stub codebase-memory-mcp "echo 'codebase-memory-mcp $(lock codebase-memory-mcp)'"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  [ -e "$m" ]
+  [[ "$output" == *"bin/update"* ]]
+  # the next render differs, so chezmoi reruns the script
+  HOME="$SB_HOME" chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/$SCRIPT" > "$SB/again.sh"
+  grep -q '^# retry: retry$' "$SB/again.sh"
+  # a clean run (everything present) removes the marker
+  fake_claude
+  for p in $(manifest_plugins); do printf '  {\n    "id": "%s"\n  },\n' "$p"; done > "$SB/plugins.json"
+  for m2 in $(manifest_mkts); do printf '  {\n    "name": "%s"\n  },\n' "$m2"; done > "$SB/mkts.json"
+  run_script "$SB/again.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$m" ]
 }
 
 @test "generic CLAUDE.md and agents mention no project nouns" {
@@ -284,7 +339,9 @@ EOF
     sh /tmp/c.sh > /tmp/c2.log 2>&1; echo "rerun-rc=$?"; cat /tmp/c2.log
     grep -qE "Added stdio MCP|Removed MCP" /tmp/c2.log && echo MCP-READDED
     [ "$(sha256sum ~/.claude/settings.json)" = "$s1" ] && echo SETTINGS-STABLE
+    # bootstrap re-resolves the lock inside the container: compare with the lock it used
     echo "graphify-skill=$(cat ~/.claude/skills/graphify/.graphify_version 2>/dev/null)"
+    echo "graphify-lock=$(sed -n "s/^  graphifyy: *'"'"'\{0,1\}\([^'"'"']*\)'"'"'\{0,1\}\$/\1/p" ~/.local/share/chezmoi/home/.chezmoidata/versions.yaml)"
     [ -s ~/.claude/agents/codebase-memory.md ] && echo CBM-AGENT-OK
     for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
       [ -x ~/.claude/hooks/$h ] && echo "CBM-HOOK-OK $h"
@@ -298,7 +355,9 @@ EOF
   [[ "$output" == *DIFF-EMPTY* ]]
   [[ "$output" == *SETTINGS-STABLE* ]]
   [[ "$output" != *MCP-READDED* ]]
-  [[ "$output" == *"graphify-skill=$(lock graphifyy)"* ]]
+  used="$(printf '%s\n' "$output" | sed -n 's/^graphify-lock=//p')"
+  [ -n "$used" ]
+  [[ "$output" == *"graphify-skill=$used"* ]]
   [[ "$output" == *CBM-AGENT-OK* ]]
   for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
     [[ "$output" == *"CBM-HOOK-OK $h"* ]]

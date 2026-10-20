@@ -320,3 +320,31 @@ EOF2
   run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --role server --ci
   [[ "$output" != *"warning: reusing"* ]]
 }
+
+@test "bootstrap on macOS: the Xcode stub git prints xcode-select --install, never sudo apt" {
+  stub uname 'case "$1" in -m) echo arm64 ;; *) echo Darwin ;; esac'
+  stub git 'echo "xcrun: error: invalid active developer path" >&2; exit 1'
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"xcode-select --install"* ]]
+  [[ "$output" != *"sudo apt"* ]]
+}
+
+@test "doctor WARNs about install scripts waiting for a retry, with the command to run" {
+  HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"PASS install_retries"* ]]
+  mkdir -p "$H/.local/state/develop-env/retry"; : > "$H/.local/state/develop-env/retry/50-claude"
+  HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"WARN install_retries: install scripts waiting for a retry: 50-claude: run $REPO_ROOT/bin/update (or re-run bootstrap)"* ]]
+}
+
+@test "codex install script leaves a retry marker when downloads fail" {
+  f="$(render run_onchange_after_55-codex.sh.tmpl)"
+  grep -qx '# retry: ' "$f"
+  stub curl 'exit 22'
+  HOME="$H" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  [ "$status" -eq 0 ]
+  [ -e "$H/.local/state/develop-env/retry/55-codex" ]
+}

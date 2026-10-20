@@ -5,11 +5,18 @@
 # into ~/Library/Fonts. No admin rights: what needs them (installing Homebrew,
 # the Command Line Tools) is printed as commands at the end. Already installed
 # pieces are skipped. Warns and exits 0 on any failure; never aborts apply.
+# The brew marker changes when Homebrew is installed, and a failed font
+# download leaves a retry marker, so the next apply (bin/update) reruns this.
+# brew: {{ if stat "/opt/homebrew/bin/brew" }}present{{ else }}{{ if stat "/usr/local/bin/brew" }}present{{ else }}absent{{ end }}{{ end }}
+# retry: {{ if stat (joinPath .chezmoi.homeDir ".local/state/develop-env/retry/70-desktop") }}retry{{ end }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 
 warn() { echo "warning: $*" >&2; }
 ADMIN=
+RETRY="$HOME/.local/state/develop-env/retry/70-desktop"
+rm -f "$RETRY"
+retry_later() { mkdir -p "${RETRY%/*}" && : > "$RETRY"; }
 
 BREW="$(command -v brew 2>/dev/null)"
 if [ -z "$BREW" ]; then
@@ -50,7 +57,8 @@ if [ ! -f "$FONTS/JetBrainsMonoNerdFont-Regular.ttf" ]; then
         mkdir -p "$FONTS"
         cp "$tmp"/x/JetBrainsMonoNerdFont-*.ttf "$FONTS/" || warn "could not copy the Nerd Font into $FONTS"
     else
-        warn "could not download JetBrainsMono Nerd Font"
+        warn "could not download JetBrainsMono Nerd Font (bin/update retries)"
+        retry_later
     fi
     rm -rf "$tmp"
 fi

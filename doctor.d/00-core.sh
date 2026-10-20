@@ -10,3 +10,13 @@ check_chezmoi_present() {
   return 1
 }
 register check_chezmoi_present
+
+# WARN (never FAIL): an install script failed (download, or a prerequisite not
+# there yet) and left a retry marker; the next apply reruns it.
+check_install_retries() {
+  local d="$HOME/.local/state/develop-env/retry" f pending=
+  for f in "$d"/*; do [ -e "$f" ] && pending="$pending ${f##*/}"; done
+  [ -z "$pending" ] && return 0
+  echo "install scripts waiting for a retry:$pending: $DOCTOR_FIX"; return 3
+}
+register check_install_retries

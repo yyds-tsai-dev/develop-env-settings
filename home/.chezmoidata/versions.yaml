@@ -1,4 +1,4 @@
-resolved_at: '2026-10-20T07:38:10Z'
+resolved_at: '2026-10-20T18:36:09Z'
 versions:
   bat: 0.26.1
   bw: 2026.10.0
@@ -27,5 +27,6 @@ versions:
   ripgrep: 15.2.0
   semble: 0.7.0
   skill-find-skills: 1.7.4
+  statusline: 1.0.0
   tmux: '3.8_'
   uv: 0.13.3

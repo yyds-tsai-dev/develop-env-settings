@@ -68,9 +68,11 @@ apply_with() {
 
 checksum() { cksum < "$1"; }
 
-# render_for OS SCRIPT: render a .chezmoiscripts template as if .chezmoi.os were OS.
+# render_for OS SCRIPT: render a .chezmoiscripts template as if .chezmoi.os were
+# OS: every .chezmoi.os becomes the literal "OS", so eq and ne tests against any
+# OS (e.g. 25-bw's ne .chezmoi.os "windows") hold as on that OS whatever the host.
 render_for() {
-  sed "s/eq \.chezmoi\.os \"$1\"/true/g" "$REPO_ROOT/home/.chezmoiscripts/$2" > "$SB/$2"
+  sed "s/\.chezmoi\.os/\"$1\"/g" "$REPO_ROOT/home/.chezmoiscripts/$2" > "$SB/$2"
   chezmoi_iso execute-template < "$SB/$2" > "$SB/$2.out"
   echo "$SB/$2.out"
 }
@@ -206,7 +208,7 @@ EOF
   stub_bw locked
   apply_with "$STUB"
   [ "$status" -eq 0 ]
-  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .ssh/authorized_keys; do
+  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .claude .config/paper-search-mcp .ssh/authorized_keys; do
     [ ! -e "$SB_DEST/$p" ] || { echo "server-only $p rendered on a desktop" >&2; false; }
   done
   [ -f "$SB_DEST/.wezterm.lua" ]
@@ -236,6 +238,9 @@ EOF
 
 @test "macOS desktop script prints the Homebrew install command and exits 0 without brew" {
   [ "$HOST_OS" = Darwin ] && skip "the script would find this host's real Homebrew"
+  # The run below puts only symlinked binaries on PATH; under MSYS `ln -s` copies
+  # them and a copied sh cannot find its DLLs, so the script cannot even start.
+  [ "$HOST_OS" = Linux ] || skip "needs real symlinks for a stub-only PATH (MSYS ln -s copies)"
   init_desktop
   f="$(render_for darwin run_onchange_after_70-desktop.sh.tmpl)"
   printf '#!/bin/sh\nexit 1\n' > "$STUB/curl"; chmod +x "$STUB/curl"
@@ -441,11 +446,88 @@ EOF
 
 @test "claude settings point the status line at statusline-bin.exe on windows only" {
   init_desktop
-  t='{{ template "claude-settings.json" (merge (dict "chezmoi" (merge (dict "os" "OS") .chezmoi)) .) }}'
+  # with a locked release, so statusLine renders
+  t='{{ template "claude-settings.json" (merge (dict "chezmoi" (merge (dict "os" "OS") .chezmoi) "versions" (dict "statusline" "1.0.0")) .) }}'
   run chezmoi_iso execute-template "${t/OS/windows}"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin.exe\""'* ]]
   run chezmoi_iso execute-template "${t/OS/darwin}"
   [ "$status" -eq 0 ]
   [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin\""'* ]]
+}
+
+@test "mac scripts carry a Homebrew marker so installing Homebrew reruns them" {
+  init_desktop "desktop+server"
+  if [ -x /opt/homebrew/bin/brew ] || [ -x /usr/local/bin/brew ]; then want=present; else want=absent; fi
+  for s in run_onchange_after_12-mac-cli-tools.sh.tmpl run_onchange_after_70-desktop.sh.tmpl run_onchange_after_20-fish-plugins.sh.tmpl; do
+    f="$(render_for darwin "$s")"
+    sh -n "$f"
+    grep -qx "# brew: $want" "$f" || { echo "$s: no brew marker"; false; }
+  done
+  # 70-desktop: a failed font download leaves a retry marker that the next render shows
+  f="$(render_for darwin run_onchange_after_70-desktop.sh.tmpl)"
+  grep -qx '# retry: ' "$f"
+  mkdir -p "$SB_HOME/.local/state/develop-env/retry"; : > "$SB_HOME/.local/state/develop-env/retry/70-desktop"
+  f="$(render_for darwin run_onchange_after_70-desktop.sh.tmpl)"
+  grep -qx '# retry: retry' "$f"
+}
+
+@test "bw script links npm's bw into ~/.local/bin, never over a regular file" {
+  [ "$HOST_OS" = Linux ] || skip "stub npm is a sh script; linux host only"
+  init_desktop
+  f="$(render_for darwin run_onchange_after_25-bw.sh.tmpl)"
+  sh -n "$f"
+  v="$(sed -n "s/^  bw: *'\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "$REPO_ROOT/home/.chezmoidata/versions.yaml")"
+  P="$SB/npm-global"
+  cat > "$STUB/npm" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "prefix -g") echo "$P" ;;
+  "install -g") mkdir -p "$P/bin"; printf '#!/bin/sh\necho $v\n' > "$P/bin/bw"; chmod +x "$P/bin/bw" ;;
+esac
+EOF
+  chmod +x "$STUB/npm"
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -L "$SB_HOME/.local/bin/bw" ]
+  [ "$("$SB_HOME/.local/bin/bw" --version)" = "$v" ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/25-bw" ]
+  # a regular file is kept, with a warning
+  rm "$SB_HOME/.local/bin/bw"; printf 'mine\n' > "$SB_HOME/.local/bin/bw"
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SB_HOME/.local/bin/bw")" = mine ]
+  [[ "$output" == *"regular file"* ]]
+  # already at the locked version: still linked
+  rm "$SB_HOME/.local/bin/bw"
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  [ -L "$SB_HOME/.local/bin/bw" ]
+  # no npm: warns, exits 0, leaves a retry marker
+  rm "$STUB/npm"
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  [ "$status" -eq 0 ]
+  [ -e "$SB_HOME/.local/state/develop-env/retry/25-bw" ]
+}
+
+@test "doctor puts ~/.local/bin first and finds bw there; paper-search check is server only" {
+  is_windows && skip "stub bw is a sh script"
+  mkdir -p "$SB_HOME/.local/bin"
+  printf '#!/bin/sh\necho %s\n' "'{\"status\":\"unlocked\"}'" > "$SB_HOME/.local/bin/bw"; chmod +x "$SB_HOME/.local/bin/bw"
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="/usr/bin:/bin" DOCTOR_ONLY='50-*' run "$REPO_ROOT/bin/doctor"
+  echo "$output"
+  [[ "$output" == *"PASS bw_installed"* ]]
+  [[ "$output" == *"SKIP paper_search_env: server role only"* ]]
+}
+
+@test "doctor: plain desktop SKIPs every Claude check; server role WARNs on a missing status line" {
+  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for c in claude_installed claude_plugins claude_mcp claude_skills statusline_installed claude_login; do
+    [[ "$output" == *"SKIP $c: server role only"* ]]
+  done
+  DEVENV_ROLE=server HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"WARN statusline_installed:"*"bin/update"* ]]
 }

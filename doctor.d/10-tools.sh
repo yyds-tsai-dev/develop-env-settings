@@ -17,7 +17,7 @@ check_micromamba_envs() {
     [ -d "$HOME/micromamba/envs/$e/conda-meta" ] || missing="$missing $e"
   done
   [ -z "$missing" ] && return 0
-  echo "missing micromamba env(s):$missing"; return 1
+  echo "missing micromamba env(s):$missing: $DOCTOR_FIX"; return 1
 }
 register check_micromamba_envs
 
@@ -29,7 +29,7 @@ check_cli_tools_linked() {
     [ -x "$HOME/.local/bin/$b" ] || missing="$missing $b"
   done
   [ -z "$missing" ] && return 0
-  echo "not in ~/.local/bin:$missing"; return 1
+  echo "not in ~/.local/bin:$missing: $DOCTOR_FIX"; return 1
 }
 register check_cli_tools_linked
 
@@ -61,6 +61,6 @@ check_uv_tools() {
     printf '%s\n' "$list" | grep -q "^$t v" || missing="$missing $t"
   done
   [ -z "$missing" ] && return 0
-  echo "uv tool(s) not installed:$missing"; return 1
+  echo "uv tool(s) not installed:$missing: $DOCTOR_FIX"; return 1
 }
 register check_uv_tools

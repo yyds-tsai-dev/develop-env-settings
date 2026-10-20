@@ -37,13 +37,13 @@ function check_nerd_font {
     foreach ($d in @((Join-Path "$env:LOCALAPPDATA" 'Microsoft\Windows\Fonts'), (Join-Path "$env:WINDIR" 'Fonts'))) {
         if (Test-Path (Join-Path $d 'JetBrainsMonoNerdFont-Regular.ttf')) { return $null }
     }
-    return @{ Status = 'FAIL'; Reason = 'JetBrainsMono Nerd Font not in the user font dir (rerun apply)' }
+    return @{ Status = 'FAIL'; Reason = 'JetBrainsMono Nerd Font not in the user font dir: re-run the bootstrap one-liner (irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex)' }
 }
 Register 'check_nerd_font'
 
 function check_wezterm_config {
     if (Test-Path (Join-Path $HOME '.wezterm.lua')) { return $null }
-    return @{ Status = 'FAIL'; Reason = '~/.wezterm.lua missing (rerun apply)' }
+    return @{ Status = 'FAIL'; Reason = '~/.wezterm.lua missing: re-run the bootstrap one-liner (irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex)' }
 }
 Register 'check_wezterm_config'
 
@@ -51,6 +51,6 @@ function check_ssh_config {
     if ($script:DoctorCi) { return @{ Status = 'SKIP'; Reason = 'secret check skipped in -Ci' } }
     $f = Join-Path $HOME '.ssh\config'
     if ((Test-Path $f) -and ((Get-Item $f).Length -gt 0)) { return $null }
-    return @{ Status = 'FAIL'; Reason = '~/.ssh/config missing (unlock Bitwarden and apply again)' }
+    return @{ Status = 'FAIL'; Reason = '~/.ssh/config missing: unlock Bitwarden (bw login; $env:BW_SESSION = bw unlock --raw; bw sync), then re-run the bootstrap one-liner (irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex)' }
 }
 Register 'check_ssh_config'

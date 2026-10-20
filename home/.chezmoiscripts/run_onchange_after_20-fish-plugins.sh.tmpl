@@ -3,7 +3,14 @@
 # Installs fisher, syncs fish_plugins, then reproduces the captured tide prompt.
 # Reruns when the plugin list or this script changes.
 # fish_plugins: {{ include "dot_config/fish/fish_plugins" | sha256sum }}
-# Never aborts apply: failures print a warning and exit 0.
+# Never aborts apply: failures print a warning and exit 0. A failure (fish not
+# installed yet, or a download error) leaves a retry marker, so the next apply
+# reruns this script; success removes it. (chezmoi keys run_onchange_ by name,
+# so the apply after the one that removed the marker runs it once more: harmless.)
+{{- if eq .chezmoi.os "darwin" }}
+# brew: {{ if stat "/opt/homebrew/bin/brew" }}present{{ else }}{{ if stat "/usr/local/bin/brew" }}present{{ else }}absent{{ end }}{{ end }}
+{{- end }}
+# retry: {{ if stat (joinPath .chezmoi.homeDir ".local/state/develop-env/retry/20-fish-plugins") }}retry{{ end }}
 PATH="$HOME/.local/bin:$PATH"
 {{- if eq .chezmoi.os "darwin" }}
 PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew fish/tmux (12-mac-cli-tools)
@@ -11,17 +18,18 @@ PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew fish
 export PATH
 
 warn() { echo "warning: $*" >&2; }
+RETRY="$HOME/.local/state/develop-env/retry/20-fish-plugins"
+retry() { warn "$*"; mkdir -p "${RETRY%/*}" && : > "$RETRY"; exit 0; }
 
 if ! command -v fish >/dev/null 2>&1; then
-    warn "fish is not installed yet; skipping fisher and tide setup"
-    exit 0
+    retry "fish is not installed yet; skipping fisher and tide setup (bin/update retries)"
 fi
 
 fish -c 'functions -q fisher; or begin
     curl -fsSL --max-time 30 https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source
     and fisher install jorgebucaran/fisher
-end' || { warn "fisher install failed; skipping fish plugins and tide"; exit 0; }
-fish -c 'fisher update' || { warn "fisher update failed; skipping tide"; exit 0; }
+end' || retry "fisher install failed; skipping fish plugins and tide (bin/update retries)"
+fish -c 'fisher update' || retry "fisher update failed; skipping tide (bin/update retries)"
 
 # Flags reproduce the tide_* universal variables captured from the old host:
 # Classic style, dark true-colour bars, slanted separators, sharp heads, flat tails,
@@ -32,6 +40,7 @@ fish -c 'tide configure --auto --style=Classic --prompt_colors="True color" \
     --powerline_prompt_style="Two lines, character" --powerline_right_prompt_frame=Yes \
     --prompt_connection=Disconnected --prompt_connection_andor_frame_color=Dark \
     --prompt_spacing=Compact --show_time=No --icons="Many icons" --transient=Yes' \
-    || warn "tide configure failed"
+    || retry "tide configure failed (bin/update retries)"
+rm -f "$RETRY"
 exit 0
 {{- end }}

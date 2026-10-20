@@ -38,19 +38,19 @@ check_nerd_font() {
   for f in "$HOME/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf" "/Library/Fonts/JetBrainsMonoNerdFont-Regular.ttf"; do
     [ -f "$f" ] && return 0
   done
-  echo "JetBrainsMono Nerd Font not in ~/Library/Fonts (rerun apply)"; return 1
+  echo "JetBrainsMono Nerd Font not in ~/Library/Fonts (the font download failed): $DOCTOR_FIX"; return 1
 }
 register check_nerd_font
 
 check_wezterm_config() {
   [ -f "$HOME/.wezterm.lua" ] && return 0
-  echo "~/.wezterm.lua missing (rerun apply)"; return 1
+  echo "~/.wezterm.lua missing: $DOCTOR_FIX"; return 1
 }
 register check_wezterm_config
 
 check_ssh_config() {
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "secret check skipped in --ci"; return 2; fi
   [ -s "$HOME/.ssh/config" ] && return 0
-  echo "~/.ssh/config missing (unlock Bitwarden and apply again)"; return 1
+  echo "~/.ssh/config missing: unlock Bitwarden (bw login; export BW_SESSION=\$(bw unlock --raw); bw sync), then $DOCTOR_FIX"; return 1
 }
 register check_ssh_config

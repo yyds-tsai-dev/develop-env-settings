@@ -12,6 +12,9 @@ $script:DoctorRoot = Split-Path -Parent $PSScriptRoot
 $script:DoctorCi = [bool]$Ci
 $script:DoctorChecks = @()
 
+# ~/.local/bin first (chezmoi, uv and bw.exe live there), before the role lookup runs chezmoi.
+$env:Path = (Join-Path $HOME '.local\bin') + [IO.Path]::PathSeparator + $env:Path
+
 # Role: chezmoi's .role, else $env:DEVENV_ROLE, else desktop (the Windows role).
 $script:DoctorRole = ''
 if (Get-Command chezmoi -ErrorAction SilentlyContinue) {

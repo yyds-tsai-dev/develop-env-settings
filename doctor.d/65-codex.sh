@@ -6,7 +6,7 @@ _codex_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
 _codex_present() {
   command -v codex >/dev/null 2>&1 && return 0
-  echo "codex not on PATH (rerun apply: run_onchange_after_55-codex installs it)"; return 1
+  echo "codex not on PATH: $DOCTOR_FIX"; return 1
 }
 
 # _codex_mcp_names: config names (lock key minus "mcp-") of the manifest MCP
@@ -53,7 +53,7 @@ register check_codex_installed
 check_codex_mcp() {
   doctor_server_only || return
   local cfg="$HOME/.codex/config.toml" n missing= notimeout= have
-  [ -f "$cfg" ] || { echo "$cfg missing (rerun apply)"; return 1; }
+  [ -f "$cfg" ] || { echo "$cfg missing: $DOCTOR_FIX"; return 1; }
   have="$(awk '/^\[mcp_servers\.[^.]+\]$/ { n = $0; sub(/^\[mcp_servers\./, "", n); sub(/\]$/, "", n); print n " table"; next }
                /^\[/ { if ($0 !~ /^\[mcp_servers\./) n = ""; next }
                n && /^tool_timeout_sec *=/ { print n " timeout" }' "$cfg")"
@@ -75,7 +75,7 @@ check_codex_skills() {
   doctor_server_only || return
   local sk="$HOME/.codex/skills" st="$HOME/.codex/skill-bundles/.devenv-skills"
   local b d kind name missing= broken= abs=
-  [ -f "$st" ] || { echo "$st missing (rerun apply: run_onchange_after_55-codex)"; return 1; }
+  [ -f "$st" ] || { echo "$st missing: $DOCTOR_FIX"; return 1; }
   for b in $(_codex_bundles); do grep -q "^bundle $b " "$st" || missing="$missing $b"; done
   for d in codex-queue-workflow codebase-memory $(_codex_skill_dirs); do
     grep -qx "skill $d" "$st" || [ "$d" = codex-queue-workflow ] || missing="$missing $d"
@@ -92,6 +92,7 @@ check_codex_skills() {
   [ -n "$missing" ] && echo "not installed:$missing"
   [ -n "$broken" ] && echo "skill(s) not resolving to a SKILL.md:$broken"
   [ -n "$abs" ] && echo "absolute link:$abs"
+  echo "$DOCTOR_FIX"
   return 1
 }
 register check_codex_skills

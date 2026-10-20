@@ -22,7 +22,9 @@ render_with() {
     { printf '{{ $_ := set .versions "statusline" "%s" }}' "$1"; cat "$REPO_ROOT/home/.chezmoiscripts/run_onchange_after_60-statusline.sh.tmpl"; } \
       | chezmoi_iso execute-template > "$SB/sl.sh"
   else
-    chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/run_onchange_after_60-statusline.sh.tmpl" > "$SB/sl.sh"
+    # no release locked (whatever the committed lock says)
+    { printf '{{ $_ := unset .versions "statusline" }}'; cat "$REPO_ROOT/home/.chezmoiscripts/run_onchange_after_60-statusline.sh.tmpl"; } \
+      | chezmoi_iso execute-template > "$SB/sl.sh"
   fi
   sh -n "$SB/sl.sh"
 }
@@ -72,4 +74,11 @@ run_sl() {
   [ ! -e "$REPO_ROOT/statusline/build.sh" ]
   grep -q "statusline-v\*" "$REPO_ROOT/.github/workflows/statusline-release.yml"
   grep -q "CGO_ENABLED" "$REPO_ROOT/.github/workflows/statusline-release.yml"
+}
+
+@test "curl has connect and total timeouts; the script hashes the statusline source" {
+  render_with 0.1.0
+  grep -qF -- '--connect-timeout 15 --max-time 120' "$SB/sl.sh"
+  grep -qF "$(sha256sum "$REPO_ROOT/statusline/main.go" | cut -d' ' -f1)" "$SB/sl.sh"
+  grep -qF "$(sha256sum "$REPO_ROOT/statusline/go.mod" | cut -d' ' -f1)" "$SB/sl.sh"
 }

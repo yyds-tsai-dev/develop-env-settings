@@ -1,4 +1,7 @@
-{{- if eq .chezmoi.os "windows" -}}
+{{- /* Server role only (plain Desktops get no Claude Code). Windows has no
+server role (Server use goes through WSL2), so this renders empty today; kept
+for a future Windows server role. */ -}}
+{{- if and .isServer (eq .chezmoi.os "windows") -}}
 {{- $sl := index .versions "statusline" | default "" -}}
 # Installs the Claude Code status line binary to ~/.claude/statusline-bin.exe.
 # Locked release (tag statusline-v<version>): downloads statusline-windows-amd64.exe.
@@ -15,7 +18,7 @@ try {
         $url = "https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$version/statusline-windows-amd64.exe"
         try {
             $tmp = "$dest.tmp"
-            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $url -OutFile $tmp
             Move-Item -Force $tmp $dest
             exit 0
         } catch {

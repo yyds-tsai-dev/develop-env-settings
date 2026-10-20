@@ -1,4 +1,4 @@
-{{- if and (or .isServer .isDesktop) (ne .chezmoi.os "windows") -}}
+{{- if .isServer -}}
 {{- $sl := index .versions "statusline" | default "" -}}
 #!/bin/sh
 # Installs the Claude Code status line binary to ~/.claude/statusline-bin.
@@ -6,6 +6,7 @@
 # No release locked yet: builds statusline/ locally when `go` exists, else warns.
 # Warns and exits 0 on any failure; never aborts apply.
 # Lock: statusline={{ $sl }}
+# Source (a local build reruns when it changes): {{ include "../statusline/main.go" | sha256sum }} {{ include "../statusline/go.mod" | sha256sum }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 SL_VERSION="{{ $sl }}"
@@ -25,7 +26,7 @@ mkdir -p "$HOME/.claude" || { warn "cannot create ~/.claude; skipping status lin
 if [ -n "$SL_VERSION" ] && [ -n "$ASSET" ]; then
     url="https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$SL_VERSION/$ASSET"
     tmp="$DEST.tmp.$$"
-    if curl -fsSL --retry 3 -o "$tmp" "$url"; then
+    if curl -fsSL --retry 3 --connect-timeout 15 --max-time 120 -o "$tmp" "$url"; then
         chmod +x "$tmp" && mv -f "$tmp" "$DEST" && exit 0
     fi
     rm -f "$tmp"

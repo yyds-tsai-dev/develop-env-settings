@@ -4,6 +4,8 @@ and re-applied by run_onchange_after_50-claude.sh (the codebase-memory-mcp insta
 `claude plugin marketplace add` rewrite the file). enabledPlugins and
 extraKnownMarketplaces come from the Manifest; builtin marketplaces are not declared.
 The cbm hooks call the wrapper scripts that installer writes to ~/.claude/hooks.
+statusLine appears only once a statusline release is locked or the binary exists
+(a local build), so Claude never runs a missing command.
 */ -}}
 {
   "model": "opus",
@@ -87,11 +89,14 @@ The cbm hooks call the wrapper scripts that installer writes to ~/.claude/hooks.
       }
     ]
   },
+{{- $slBin := printf "statusline-bin%s" (eq .chezmoi.os "windows" | ternary ".exe" "") }}
+{{- if or (index .versions "statusline") (stat (joinPath .chezmoi.homeDir ".claude" $slBin)) }}
   "statusLine": {
     "type": "command",
-    "command": "\"$HOME/.claude/statusline-bin{{ if eq .chezmoi.os "windows" }}.exe{{ end }}\"",
+    "command": "\"$HOME/.claude/{{ $slBin }}\"",
     "refreshInterval": 60
   },
+{{- end }}
   "enabledPlugins": {
 {{- range $i, $p := .claude.plugins }}{{ if $i }},{{ end }}
     {{ $p.name | quote }}: true

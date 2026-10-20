@@ -1,12 +1,12 @@
 # Claude Code checks (install, plugins, MCP servers, skills, login).
-# Protocol: see bin/doctor. --ci: login is SKIP. MCP servers and skills depend
-# on the Server uv tools, so those two SKIP on a plain Desktop.
+# Protocol: see bin/doctor. --ci: login is SKIP. Server role only: a plain
+# Desktop gets no Claude Code, so every check SKIPs there.
 
 _claude_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
 _claude_present() {
   command -v claude >/dev/null 2>&1 && return 0
-  echo "claude not on PATH (rerun apply: run_onchange_after_50-claude installs it)"; return 1
+  echo "claude not on PATH: $DOCTOR_FIX"; return 1
 }
 
 # _claude_names SECTION [FIELD]: values of FIELD (default name) in the manifest's
@@ -28,6 +28,7 @@ _claude_mcp_names() {
 }
 
 check_claude_installed() {
+  doctor_server_only || return
   _claude_present || return 1
   claude --version >/dev/null 2>&1 && return 0
   echo "claude --version failed"; return 1
@@ -36,13 +37,14 @@ register check_claude_installed
 
 check_claude_plugins() {
   local list p missing=
+  doctor_server_only || return
   _claude_present || return 1
   list="$(claude plugin list --json 2>/dev/null)"
   for p in $(_claude_names plugins); do
     printf '%s\n' "$list" | grep -qF "\"id\": \"$p\"" || missing="$missing $p"
   done
   [ -z "$missing" ] && return 0
-  echo "plugin(s) not installed:$missing"; return 1
+  echo "plugin(s) not installed:$missing: $DOCTOR_FIX"; return 1
 }
 register check_claude_plugins
 
@@ -62,6 +64,7 @@ check_claude_mcp() {
   [ -z "$missing$failed" ] && return 0
   [ -n "$missing" ] && echo "MCP server(s) not registered:$missing"
   [ -n "$failed" ] && echo "MCP server(s) not connecting:$failed"
+  echo "$DOCTOR_FIX"
   return 1
 }
 register check_claude_mcp
@@ -73,11 +76,21 @@ check_claude_skills() {
     [ -f "$HOME/.claude/skills/$d/SKILL.md" ] || missing="$missing $d"
   done
   [ -z "$missing" ] && return 0
-  echo "skill(s) missing from ~/.claude/skills:$missing"; return 1
+  echo "skill(s) missing from ~/.claude/skills:$missing: $DOCTOR_FIX"; return 1
 }
 register check_claude_skills
 
+# WARN (never FAIL): no statusline release is locked yet and no local build ran
+# (go missing), so settings.json has no statusLine.
+check_statusline_installed() {
+  doctor_server_only || return
+  [ -x "$HOME/.claude/statusline-bin" ] && return 0
+  echo "~/.claude/statusline-bin missing (no statusline release locked and no go to build it): install go or wait for a release, then $DOCTOR_FIX"; return 3
+}
+register check_statusline_installed
+
 check_claude_login() {
+  doctor_server_only || return
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "login check skipped in --ci"; return 2; fi
   _claude_present || return 1
   claude auth status >/dev/null 2>&1 && return 0

@@ -13,9 +13,15 @@ export DOCTOR_ROOT="$ROOT"
 DOCTOR_CI=0
 [ "${1:-}" = "--ci" ] && DOCTOR_CI=1
 export DOCTOR_CI
+# What to run to retry installs and re-apply: checks quote it in their hints.
+DOCTOR_FIX="run $ROOT/bin/update (or re-run bootstrap)"
+export DOCTOR_FIX
 
 # Role: chezmoi's .role, else $DEVENV_ROLE, else server on Linux and desktop
 # elsewhere. Exported as DOCTOR_ROLE; server-only checks call doctor_server_only.
+# ~/.local/bin first (chezmoi, uv, bw and the tool links live there), before the
+# role lookup below runs chezmoi.
+PATH="$HOME/.local/bin:$PATH"; export PATH
 if [ "$(uname -s)" = Darwin ]; then
   PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; export PATH   # Homebrew tools
 fi
