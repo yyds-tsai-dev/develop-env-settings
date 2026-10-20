@@ -1,0 +1,42 @@
+{{- if and (or .isServer .isDesktop) (ne .chezmoi.os "windows") -}}
+{{- $sl := index .versions "statusline" | default "" -}}
+#!/bin/sh
+# Installs the Claude Code status line binary to ~/.claude/statusline-bin.
+# Locked release (tag statusline-v<version>): downloads the matching asset.
+# No release locked yet: builds statusline/ locally when `go` exists, else warns.
+# Warns and exits 0 on any failure; never aborts apply.
+# Lock: statusline={{ $sl }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+SL_VERSION="{{ $sl }}"
+SRC_DIR="{{ .chezmoi.sourceDir }}/../statusline"
+DEST="$HOME/.claude/statusline-bin"
+
+warn() { echo "warning: $*" >&2; }
+
+case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) ASSET=statusline-linux-amd64 ;;
+    Darwin-arm64|Darwin-aarch64) ASSET=statusline-darwin-arm64 ;;
+    *) ASSET= ;;
+esac
+
+mkdir -p "$HOME/.claude" || { warn "cannot create ~/.claude; skipping status line"; exit 0; }
+
+if [ -n "$SL_VERSION" ] && [ -n "$ASSET" ]; then
+    url="https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$SL_VERSION/$ASSET"
+    tmp="$DEST.tmp.$$"
+    if curl -fsSL --retry 3 -o "$tmp" "$url"; then
+        chmod +x "$tmp" && mv -f "$tmp" "$DEST" && exit 0
+    fi
+    rm -f "$tmp"
+    warn "could not download $url"
+fi
+
+if command -v go >/dev/null 2>&1 && [ -f "$SRC_DIR/main.go" ]; then
+    (cd "$SRC_DIR" && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$DEST" .) \
+        || warn "local status line build failed"
+    exit 0
+fi
+warn "status line not installed (no release locked and no go on PATH)"
+exit 0
+{{- end }}

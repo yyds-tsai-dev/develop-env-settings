@@ -50,6 +50,16 @@ jobs:
           .tools/bin/bats --tap -T --filter-tags docker tests/bats/claude.bats 2>&1 | tee bats.out || rc=$?
           [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "docker claude install"
           exit "$rc"
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version-file: statusline/go.mod
+      - name: statusline go
+        if: runner.os == 'Linux'
+        working-directory: statusline
+        run: |
+          go test ./...
+          GOOS=windows GOARCH=amd64 go build ./...
       - name: pytest
         run: |
           if [ -d tests/py ]; then

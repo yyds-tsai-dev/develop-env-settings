@@ -1,0 +1,39 @@
+{{- if eq .chezmoi.os "windows" -}}
+{{- $sl := index .versions "statusline" | default "" -}}
+# Installs the Claude Code status line binary to ~/.claude/statusline-bin.exe.
+# Locked release (tag statusline-v<version>): downloads statusline-windows-amd64.exe.
+# No release locked yet: builds statusline/ locally when `go` exists, else warns.
+# Never aborts apply.
+# Lock: statusline={{ $sl }}
+$ErrorActionPreference = 'Continue'
+$version = '{{ $sl }}'
+$srcDir = Join-Path '{{ .chezmoi.sourceDir }}' '../statusline'
+$dest = Join-Path $HOME '.claude/statusline-bin.exe'
+try {
+    New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+    if ($version) {
+        $url = "https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$version/statusline-windows-amd64.exe"
+        try {
+            $tmp = "$dest.tmp"
+            Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $tmp
+            Move-Item -Force $tmp $dest
+            exit 0
+        } catch {
+            Write-Warning "could not download ${url}: $_"
+        }
+    }
+    if ((Get-Command go -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $srcDir 'main.go'))) {
+        Push-Location $srcDir
+        try {
+            $env:CGO_ENABLED = '0'
+            & go build -trimpath -ldflags='-s -w' -o $dest .
+            if ($LASTEXITCODE -ne 0) { Write-Warning 'local status line build failed' }
+        } finally { Pop-Location }
+        exit 0
+    }
+    Write-Warning 'status line not installed (no release locked and no go on PATH)'
+} catch {
+    Write-Warning "status line install failed: $_"
+}
+exit 0
+{{- end }}
