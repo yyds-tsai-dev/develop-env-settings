@@ -3,11 +3,13 @@
 # for examples
 # >>> develop-env path >>>
 # ~/.local/bin first, exactly once (re-sourcing does not duplicate it).
-__de_p=":$PATH:"
-__de_p="${__de_p//":$HOME/.local/bin:"/:}"
-__de_p="${__de_p#:}"; __de_p="${__de_p%:}"
-export PATH="$HOME/.local/bin${__de_p:+:$__de_p}"
-unset __de_p
+__de_path_first() {
+    local p=":$PATH:"
+    p="${p//":$HOME/.local/bin:"/:}"
+    p="${p#:}"; p="${p%:}"
+    export PATH="$HOME/.local/bin${p:+:$p}"
+}
+__de_path_first
 # <<< develop-env path <<<
 
 # If not running interactively, don't do anything
@@ -132,6 +134,7 @@ fi
 if command -v fnm >/dev/null 2>&1; then
     eval "$(fnm env --use-on-cd --shell bash 2>/dev/null)"
 fi
+__de_path_first   # hooks above may prepend their own dirs
 # <<< develop-env tools <<<
 
 [ -f ~/.bashrc.local ] && . ~/.bashrc.local

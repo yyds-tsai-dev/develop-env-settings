@@ -4,11 +4,14 @@
 {{- $in := .chezmoi.stdin -}}
 {{- $block := `# >>> develop-env >>>
 # Managed by develop-env-settings; edit the repo, not this block.
-if ("$path[1]" != "$HOME/.local/bin") set path = ($HOME/.local/bin $path)
+if ($#path == 0) set path = ($HOME/.local/bin)
+if ($#path > 0) then
+    if ("$path[1]" != "$HOME/.local/bin") set path = ($HOME/.local/bin $path)
+endif
 if ($?prompt) then
     tty -s
     if ($status == 0) then
-        where fish >& /dev/null
+        which fish >& /dev/null
         if ($status == 0) exec fish
     endif
 endif

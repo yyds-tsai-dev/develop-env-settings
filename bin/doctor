@@ -2,6 +2,8 @@
 # Doctor: runs every doctor.d/*.sh check. Usage: bin/doctor [--ci]
 # Output per check: PASS <name> | FAIL <name>: <reason> | SKIP <name>: <reason>
 # Exit status 1 if any check FAILs. --ci turns login and Secret checks into SKIP.
+# DOCTOR_ONLY=<glob> sources only the doctor.d files whose name matches the glob
+# (e.g. DOCTOR_ONLY='00-*'); unset means all.
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +22,10 @@ skip() { echo "SKIP $1: $2"; }
 # fail; print reason and return 2 on skip. }
 DOCTOR_FAILED=0
 for f in "$ROOT"/doctor.d/*.sh; do
-  [ -e "$f" ] && . "$f"
+  [ -e "$f" ] || continue
+  case "$(basename "$f")" in
+    ${DOCTOR_ONLY:-*}) . "$f" ;;
+  esac
 done
 
 for name in "${DOCTOR_CHECKS[@]}"; do

@@ -91,8 +91,8 @@ is_windows() { case "$HOST_OS" in MINGW*|MSYS*|CYGWIN*) return 0;; *) return 1;;
   [ -z "$output" ]
 }
 
-@test "doctor reports the core check as PASS" {
-  run "$REPO_ROOT/bin/doctor" --ci
-  [ -n "$output" ]
+@test "doctor exits 0 with only core checks" {
+  DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  [ "$status" -eq 0 ]
   [[ "$output" == *"PASS chezmoi_present"* ]]
 }

@@ -183,3 +183,37 @@ apply_seeded() {
   [[ "$output" == *"tmux_version"* ]]
   [[ "$output" == *"git_user_email"* ]]
 }
+
+@test "hooks that prepend to PATH do not displace ~/.local/bin (bash)" {
+  render_server
+  h="$(mktemp -d "${TMPDIR:-/tmp}/devenv-h.XXXXXX")"; mkdir -p "$h/stub"
+  printf '#!/bin/sh\necho "export PATH=/fake:\\$PATH"\n' > "$h/stub/fnm"; chmod +x "$h/stub/fnm"
+  out="$(env -i HOME="$h" PATH="$h/stub:/usr/bin:/bin" \
+    bash --norc -i -c '. "$1"; echo "$PATH"' _ "$DEST/.bashrc" </dev/null 2>/dev/null)"
+  [[ "$out" == *"/fake:"* ]]
+  [ "${out%%:*}" = "$h/.local/bin" ]
+  [ "$(printf '%s' "$out" | tr ':' '\n' | grep -cxF "$h/.local/bin")" -eq 1 ]
+}
+
+@test "hooks that prepend to PATH do not displace ~/.local/bin (fish)" {
+  [ -n "$FISH" ] || skip "fish not available"
+  render_server
+  h="$(mktemp -d "${TMPDIR:-/tmp}/devenv-h.XXXXXX")"; mkdir -p "$h/stub"
+  printf '#!/bin/sh\necho "set -gx PATH /fake \\$PATH"\n' > "$h/stub/fnm"; chmod +x "$h/stub/fnm"
+  out="$(env -i HOME="$h" PATH="$h/stub:/usr/bin:/bin" \
+    "$FISH" --no-config -c 'source $argv[1]; string join : $PATH' "$DEST/.config/fish/conf.d/10-env.fish")"
+  [[ "$out" == *"/fake:"* ]]
+  [ "${out%%:*}" = "$h/.local/bin" ]
+  [ "$(printf '%s' "$out" | tr ':' '\n' | grep -cxF "$h/.local/bin")" -eq 1 ]
+}
+
+@test "fish plugin script warns and exits 0 when fish fails" {
+  new_sandbox; init_role server >&2
+  h="$SB/h"; mkdir -p "$h/stub"
+  printf '#!/bin/sh\nexit 1\n' > "$h/stub/fish"; chmod +x "$h/stub/fish"
+  chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/run_onchange_after_20-fish-plugins.sh.tmpl" > "$SB/script.sh"
+  run env -i HOME="$h" PATH="$h/stub:/usr/bin:/bin" sh "$SB/script.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning:"* ]]
+  grep -q -- '--max-time 30' "$SB/script.sh"
+}
