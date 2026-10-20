@@ -1,5 +1,6 @@
 # Codex checks (install, MCP servers in config.toml, skills, login).
-# Protocol: see bin/doctor. --ci: login is SKIP.
+# Protocol: see bin/doctor. --ci: login is SKIP. Server role only (Codex is
+# installed by 55-codex on Servers), so every check SKIPs on a plain Desktop.
 
 _codex_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
@@ -40,6 +41,7 @@ _codex_skill_dirs() {
 }
 
 check_codex_installed() {
+  doctor_server_only || return
   _codex_present || return 1
   codex --version >/dev/null 2>&1 && return 0
   echo "codex --version failed"; return 1
@@ -49,6 +51,7 @@ register check_codex_installed
 # Every manifest server is a [mcp_servers.<name>] table in ~/.codex/config.toml
 # and sets tool_timeout_sec.
 check_codex_mcp() {
+  doctor_server_only || return
   local cfg="$HOME/.codex/config.toml" n missing= notimeout= have
   [ -f "$cfg" ] || { echo "$cfg missing (rerun apply)"; return 1; }
   have="$(awk '/^\[mcp_servers\.[^.]+\]$/ { n = $0; sub(/^\[mcp_servers\./, "", n); sub(/\]$/, "", n); print n " table"; next }
@@ -69,6 +72,7 @@ register check_codex_mcp
 # Every manifest bundle installed (recorded by the install script), every
 # recorded skill resolves to a SKILL.md, links are relative.
 check_codex_skills() {
+  doctor_server_only || return
   local sk="$HOME/.codex/skills" st="$HOME/.codex/skill-bundles/.devenv-skills"
   local b d kind name missing= broken= abs=
   [ -f "$st" ] || { echo "$st missing (rerun apply: run_onchange_after_55-codex)"; return 1; }
@@ -96,6 +100,7 @@ register check_codex_skills
 # file has none) differs from the version of Claude's installed plugin for the
 # same upstream: the two clients have drifted apart.
 check_codex_bundle_versions() {
+  doctor_server_only || return
   local st="$HOME/.codex/skill-bundles/.devenv-skills" reg="$HOME/.claude/plugins/installed_plugins.json"
   local name plugin pj dir cv clv drift=
   [ -f "$st" ] || { echo "no $st yet"; return 2; }
@@ -119,6 +124,7 @@ DEVENV_BUNDLES
 register check_codex_bundle_versions
 
 check_codex_login() {
+  doctor_server_only || return
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "login check skipped in --ci"; return 2; fi
   _codex_present || return 1
   codex login status >/dev/null 2>&1 && return 0

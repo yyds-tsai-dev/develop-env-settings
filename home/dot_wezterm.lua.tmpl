@@ -2,7 +2,13 @@
 {alias, hostname, user, port}); a locked or missing vault gives an empty list. */ -}}
 {{- $note := includeTemplate "bw-field" (dict "chezmoi" .chezmoi "item" "ssh-hosts" "field" "notes") | trim -}}
 {{- $hosts := list -}}
-{{- if $note -}}{{- $hosts = $note | fromJson -}}{{- end -}}
+{{- if regexMatch "(?s)^\\[.*\\]$" $note -}}
+{{-   range ($note | fromJson) -}}
+{{-     if and (get . "alias") (get . "hostname") -}}{{- $hosts = append $hosts . -}}{{- end -}}
+{{-   end -}}
+{{- else if $note -}}
+{{-   warnf "Bitwarden note ssh-hosts is not a JSON list: .wezterm.lua has no ssh_domains" -}}
+{{- end -}}
 -- Managed by develop-env-settings (chezmoi); edits here are overwritten on apply.
 local wezterm = require 'wezterm'
 local config = wezterm.config_builder()
@@ -18,10 +24,10 @@ config.color_scheme = 'Catppuccin Mocha'
 config.ssh_domains = {
 {{- range $hosts }}
   {
-    name = {{ .alias | toString | quote }},
-    remote_address = {{ printf "%s:%v" (.hostname | toString) (.port | default 22) | quote }},
-{{- if .user }}
-    username = {{ .user | toString | quote }},
+    name = {{ get . "alias" | toString | quote }},
+    remote_address = {{ printf "%s:%v" (get . "hostname" | toString) (get . "port" | default 22) | quote }},
+{{- if get . "user" }}
+    username = {{ get . "user" | toString | quote }},
 {{- end }}
     multiplexing = "None",
     default_prog = { "bash", "-lc", "tmux new -As wez" },

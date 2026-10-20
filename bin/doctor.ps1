@@ -4,12 +4,26 @@
 #   | WARN <name>: <reason> (advisory, does not fail)
 # Exit status 1 if any check FAILs. -Ci turns login and Secret checks into SKIP.
 # $env:DOCTOR_ONLY=<glob> limits which doctor.d files are loaded (e.g. '00-*'); unset means all.
+# $env:DEVENV_ROLE=<role> is the role when chezmoi cannot tell.
 param([switch]$Ci)
 
 $ErrorActionPreference = 'Stop'
 $script:DoctorRoot = Split-Path -Parent $PSScriptRoot
 $script:DoctorCi = [bool]$Ci
 $script:DoctorChecks = @()
+
+# Role: chezmoi's .role, else $env:DEVENV_ROLE, else desktop (the Windows role).
+$script:DoctorRole = ''
+if (Get-Command chezmoi -ErrorAction SilentlyContinue) {
+    try { $script:DoctorRole = "$(chezmoi execute-template '{{ .role }}' 2>$null)".Trim() } catch { $script:DoctorRole = '' }
+}
+if ($script:DoctorRole -notin @('server', 'desktop', 'desktop+server')) { $script:DoctorRole = "$env:DEVENV_ROLE" }
+if (-not $script:DoctorRole) { $script:DoctorRole = 'desktop' }
+$env:DOCTOR_ROLE = $script:DoctorRole
+function Test-DoctorServerOnly {
+    if ($script:DoctorRole -in @('server', 'desktop+server')) { return $null }
+    return @{ Status = 'SKIP'; Reason = "server role only (role: $($script:DoctorRole))" }
+}
 
 function Register([string]$Name) { $script:DoctorChecks += $Name }
 

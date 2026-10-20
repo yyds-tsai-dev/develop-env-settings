@@ -1,6 +1,6 @@
-{{- if and .isServer (ne .chezmoi.os "windows") -}}
+{{- if or (and .isServer (eq .chezmoi.os "linux")) (eq .chezmoi.os "darwin") -}}
 #!/bin/sh
-# Linux Server and macOS Desktop + Server.
+# Linux Server and every macOS role (npm for the Bitwarden CLI, 25-bw).
 # Installs fnm (locked version) into ~/.local/bin, then Node {{ .node.major }} as the
 # fnm default. Old Node installs (~/.nvm, ~/.local/node-v*) are left alone;
 # bin/cleanup removes them. Never aborts apply.

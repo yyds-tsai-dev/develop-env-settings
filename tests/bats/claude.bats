@@ -225,7 +225,7 @@ EOF
   for s in find-skills paper-search graphify codebase-memory; do
     mkdir -p "$SB_HOME/.claude/skills/$s"; : > "$SB_HOME/.claude/skills/$s/SKILL.md"
   done
-  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [ "$status" -eq 0 ]
   for c in claude_installed claude_plugins claude_mcp claude_skills; do
@@ -234,23 +234,23 @@ EOF
   [[ "$output" == *"SKIP claude_login"* ]]
   # outside --ci, a missing login and a missing plugin FAIL
   echo '[]' > "$SB/plugins.json"
-  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor"
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor"
   echo "$output"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL claude_login"* ]]
   [[ "$output" == *"FAIL claude_plugins"* ]]
   # a missing plugin FAILs in --ci too
-  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL claude_plugins"* ]]
   # a registered server that fails its health check FAILs
   printf 'semble: uvx - \342\234\230 Failed to connect\ncodebase-memory-mcp: codebase-memory-mcp  - \342\234\224 Connected\ndrawio: npx - \342\234\224 Connected\n' > "$SB/mcplist"
-  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [[ "$output" == *"FAIL claude_mcp: MCP server(s) not connecting: semble"* ]]
   # an unregistered one FAILs
   grep -v '^drawio:' "$SB/mcplist" > "$SB/m2"; mv "$SB/m2" "$SB/mcplist"
-  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"not registered: drawio"* ]]
 }
 

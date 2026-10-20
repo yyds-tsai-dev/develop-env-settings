@@ -34,3 +34,10 @@
     sharedHome = {{ $sharedHome }}
     ci = {{ $ci }}
     hold = {{ $hold }}
+{{- if eq $os "windows" }}
+# chezmoi runs .ps1 scripts with Windows PowerShell; Bypass applies to that
+# process only (no admin, the machine policy is unchanged).
+[interpreters.ps1]
+    command = "powershell"
+    args = ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+{{- end }}

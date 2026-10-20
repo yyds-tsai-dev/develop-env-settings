@@ -1,0 +1,20 @@
+{{- /* Desktop only (see .chezmoiignore, which also skips it, leaving an existing
+file untouched, while the vault is locked or the note is not a JSON list).
+Renders empty, so the file is not created, when the ssh-hosts note is empty.
+Each host needs alias and hostname; user and port (default 22) are optional. */ -}}
+{{- $note := includeTemplate "bw-field" (dict "chezmoi" .chezmoi "item" "ssh-hosts" "field" "notes") | trim -}}
+{{- if regexMatch "(?s)^\\[.*\\]$" $note -}}
+# Managed by develop-env-settings (chezmoi) from the Bitwarden note ssh-hosts.
+# Machine-specific settings go in ~/.ssh/config.local.
+Include config.local
+{{  range ($note | fromJson) }}
+{{- if and (get . "alias") (get . "hostname") }}
+Host {{ get . "alias" }}
+    HostName {{ get . "hostname" }}
+{{- if get . "user" }}
+    User {{ get . "user" }}
+{{- end }}
+    Port {{ get . "port" | default 22 }}
+{{ end }}
+{{- end -}}
+{{- end -}}

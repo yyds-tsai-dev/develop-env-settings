@@ -2,7 +2,9 @@
 # Doctor-checked environment. PowerShell twin of bootstrap.sh.
 #
 #   irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex
-#   pwsh -File bootstrap.ps1 [--source REPO] [--role ROLE] [--ci]
+#   powershell -ExecutionPolicy Bypass -File bootstrap.ps1 [--source REPO] [--role ROLE] [--ci]
+#   (a downloaded .ps1 needs -ExecutionPolicy Bypass under the default policy;
+#   `irm | iex` does not, and the script sets Bypass for its own process)
 #
 # 1. Installs chezmoi and uv into ~/.local/bin if missing (and puts that dir on
 #    the user PATH).
@@ -30,6 +32,9 @@
 
 function Invoke-DevenvBootstrap([string[]]$Argv) {
     $ErrorActionPreference = 'Stop'
+    $ProgressPreference = 'SilentlyContinue'   # Invoke-WebRequest is much slower with the progress bar
+    # Process scope only (no admin): lets chezmoi and doctor.ps1 run their scripts.
+    try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch { Write-Warning "could not set the execution policy for this process: $_" }
     $src = 'yyds-tsai-dev/develop-env-settings'
     $srcGiven = $false
     $role = ''

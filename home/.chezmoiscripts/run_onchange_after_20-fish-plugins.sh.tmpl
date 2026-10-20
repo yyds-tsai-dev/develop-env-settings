@@ -5,6 +5,9 @@
 # fish_plugins: {{ include "dot_config/fish/fish_plugins" | sha256sum }}
 # Never aborts apply: failures print a warning and exit 0.
 PATH="$HOME/.local/bin:$PATH"
+{{- if eq .chezmoi.os "darwin" }}
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew fish/tmux (12-mac-cli-tools)
+{{- end }}
 export PATH
 
 warn() { echo "warning: $*" >&2; }

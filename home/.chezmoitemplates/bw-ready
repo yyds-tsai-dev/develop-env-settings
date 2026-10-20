@@ -2,7 +2,9 @@
 bw-ready: reusable guard for Secret-bearing targets. Input: dict with chezmoi
 (.chezmoi), target (path relative to home, as in .chezmoiignore), item and
 fields (list of field names). Prints "true" when the vault is unlocked and every
-field resolves; otherwise warns once (warnf) and prints nothing.
+field resolves; otherwise warns once (warnf) and prints nothing. Optional
+jsonList (bool): each field must also look like a JSON list ("[...]"), so a
+malformed note skips the target instead of aborting apply in fromJson.
 Use from home/.chezmoiignore (ignored targets are left untouched, never removed):
   {{ if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes"))) }}.ssh/config{{ end }}
 */ -}}
@@ -12,8 +14,12 @@ Use from home/.chezmoiignore (ignored targets are left untouched, never removed)
 {{-   warnf "Bitwarden locked or missing: skipping %s" .target -}}
 {{- else -}}
 {{-   range .fields -}}
-{{-     if not (includeTemplate "bw-field" (dict "chezmoi" $.chezmoi "item" $.item "field" .)) -}}
+{{-     $v := includeTemplate "bw-field" (dict "chezmoi" $.chezmoi "item" $.item "field" .) | trim -}}
+{{-     if not $v -}}
 {{-       if $ok -}}{{- warnf "Bitwarden item %s field %s not found: skipping %s" $.item . $.target -}}{{- end -}}
+{{-       $ok = false -}}
+{{-     else if and (get $ "jsonList") (not (regexMatch "(?s)^\\[.*\\]$" $v)) -}}
+{{-       if $ok -}}{{- warnf "Bitwarden item %s field %s is not a JSON list: skipping %s" $.item . $.target -}}{{- end -}}
 {{-       $ok = false -}}
 {{-     end -}}
 {{-   end -}}

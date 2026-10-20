@@ -4,7 +4,8 @@
 # | WARN <name>: <reason> (advisory, does not fail)
 # Exit status 1 if any check FAILs. --ci turns login and Secret checks into SKIP.
 # DOCTOR_ONLY=<glob> sources only the doctor.d files whose name matches the glob
-# (e.g. DOCTOR_ONLY='00-*'); unset means all.
+# (e.g. DOCTOR_ONLY='00-*'); unset means all. DEVENV_ROLE=<role> is the role
+# when chezmoi cannot tell (no chezmoi, or no config yet).
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,6 +13,25 @@ export DOCTOR_ROOT="$ROOT"
 DOCTOR_CI=0
 [ "${1:-}" = "--ci" ] && DOCTOR_CI=1
 export DOCTOR_CI
+
+# Role: chezmoi's .role, else $DEVENV_ROLE, else server on Linux and desktop
+# elsewhere. Exported as DOCTOR_ROLE; server-only checks call doctor_server_only.
+if [ "$(uname -s)" = Darwin ]; then
+  PATH="$PATH:/opt/homebrew/bin:/usr/local/bin"; export PATH   # Homebrew tools
+fi
+DOCTOR_ROLE=
+if command -v chezmoi >/dev/null 2>&1; then
+  DOCTOR_ROLE="$(chezmoi execute-template '{{ .role }}' 2>/dev/null </dev/null)" || DOCTOR_ROLE=
+fi
+case "$DOCTOR_ROLE" in server|desktop|desktop+server) ;; *) DOCTOR_ROLE="${DEVENV_ROLE:-}" ;; esac
+if [ -z "$DOCTOR_ROLE" ]; then
+  if [ "$(uname -s)" = Linux ]; then DOCTOR_ROLE=server; else DOCTOR_ROLE=desktop; fi
+fi
+export DOCTOR_ROLE
+doctor_server_only() {
+  case "$DOCTOR_ROLE" in server|desktop+server) return 0 ;; esac
+  echo "server role only (role: $DOCTOR_ROLE)"; return 2
+}
 
 DOCTOR_CHECKS=()
 register() { DOCTOR_CHECKS+=("$1"); }

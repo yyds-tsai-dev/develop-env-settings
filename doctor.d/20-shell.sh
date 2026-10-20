@@ -1,4 +1,5 @@
-# Shell, tmux and git checks (Linux Server). Protocol: see bin/doctor.
+# Shell, tmux and git checks. fish/tide/tmux are server role only (SKIP on a
+# plain Desktop). Protocol: see bin/doctor.
 
 _fish_bin() {
   if command -v fish >/dev/null 2>&1; then echo fish
@@ -7,6 +8,7 @@ _fish_bin() {
 }
 
 check_fish_present() {
+  doctor_server_only || return
   _fish_bin >/dev/null && return 0
   echo "fish not found on PATH or in ~/.local/bin"
   return 1
@@ -14,6 +16,7 @@ check_fish_present() {
 register check_fish_present
 
 check_fisher_tide() {
+  doctor_server_only || return
   local fish; fish="$(_fish_bin)" || { echo "fish not found"; return 1; }
   if "$fish" -c 'fisher list' 2>/dev/null | grep -q '^ilancosman/tide'; then return 0; fi
   echo "fisher list does not contain ilancosman/tide"
@@ -22,6 +25,7 @@ check_fisher_tide() {
 register check_fisher_tide
 
 check_tmux_version() {
+  doctor_server_only || return
   local v
   command -v tmux >/dev/null 2>&1 || { echo "tmux not found"; return 1; }
   v="$(tmux -V | sed -E 's/^tmux[^0-9]*([0-9]+\.[0-9]+).*/\1/')"

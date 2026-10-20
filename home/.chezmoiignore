@@ -22,7 +22,14 @@ README.md
 .config/paper-search-mcp/.env
 {{ end }}
 {{ if .isDesktop }}
-{{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes"))) }}
+{{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
 .ssh/config
+{{   end }}
+{{- /* .wezterm.lua always renders on first install (ssh_domains = {} when locked);
+an existing one keeps its domains while the vault is not ready. */ -}}
+{{   if stat (joinPath .chezmoi.destDir ".wezterm.lua") }}
+{{     if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".wezterm.lua" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
+.wezterm.lua
+{{     end }}
 {{   end }}
 {{ end }}

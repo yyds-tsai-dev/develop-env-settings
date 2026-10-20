@@ -35,11 +35,12 @@ init_desktop() {
   cat "$SB/cfg.new" > "$SB_CONFIG"
 }
 
-# stub_bw STATUS: fake `bw` reporting STATUS, with an ssh-hosts item of two hosts.
+# stub_bw STATUS [NOTES_JSON_STRING]: fake `bw` reporting STATUS, with an
+# ssh-hosts item whose notes default to two hosts (NOTES is already JSON-escaped).
 stub_bw() {
-  cat > "$SB/ssh-hosts.json" <<'JSON'
-[{"name":"ssh-hosts","notes":"[{\"alias\":\"lab1\",\"hostname\":\"lab1.example.invalid\",\"user\":\"alice\",\"port\":22},{\"alias\":\"lab2\",\"hostname\":\"lab2.example.invalid\",\"user\":\"bob\",\"port\":2222}]"}]
-JSON
+  local notes="${2:-}"
+  [ -n "$notes" ] || notes='[{\"alias\":\"lab1\",\"hostname\":\"lab1.example.invalid\",\"user\":\"alice\",\"port\":22},{\"alias\":\"lab2\",\"hostname\":\"lab2.example.invalid\",\"user\":\"bob\",\"port\":2222}]'
+  printf '[{"name":"ssh-hosts","notes":"%s"}]\n' "$notes" > "$SB/ssh-hosts.json"
   cat > "$STUB/bw" <<STUBEOF
 #!/bin/sh
 case "\$1 \$2" in
@@ -131,11 +132,56 @@ EOF
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   before="$(checksum "$SB_DEST/.ssh/config")"
+  wez="$(checksum "$SB_DEST/.wezterm.lua")"
   stub_bw locked
   apply_with "$STUB"
+  echo "$output"
   [ "$status" -eq 0 ]
   [ "$(checksum "$SB_DEST/.ssh/config")" = "$before" ]
+  # an existing .wezterm.lua keeps its domains too, with one warning
+  [ "$(checksum "$SB_DEST/.wezterm.lua")" = "$wez" ]
+  grep -qF 'remote_address = "lab1.example.invalid:22"' "$SB_DEST/.wezterm.lua"
+  [ "$(grep -c 'Bitwarden locked or missing: skipping .wezterm.lua' <<<"$output")" -eq 1 ]
+}
+
+@test "a host without user or port gets port 22 and no user line" {
+  need_bw_stub
+  init_desktop
+  stub_bw unlocked '[{\"alias\":\"bare\",\"hostname\":\"bare.example.invalid\"},{\"hostname\":\"noalias.example.invalid\"}]'
+  apply_with "$STUB"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  f="$SB_DEST/.wezterm.lua"
+  grep -qF 'remote_address = "bare.example.invalid:22"' "$f"
+  ! grep -q 'username' "$f"
+  ! grep -q 'noalias' "$f"
+  c="$SB_DEST/.ssh/config"
+  grep -qx 'Host bare' "$c"
+  grep -qx '    Port 22' "$c"
+  ! grep -q '^    User' "$c"
+  ! grep -q 'noalias' "$c"
+}
+
+@test "a note that is not a JSON list warns and skips, apply exits 0" {
+  need_bw_stub
+  init_desktop
+  stub_bw unlocked 'lab1 lab1.example.invalid'
+  apply_with "$STUB"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$SB_DEST/.ssh/config" ]
   grep -qx 'config.ssh_domains = {}' "$SB_DEST/.wezterm.lua"
+  [[ "$output" == *"not a JSON list: skipping .ssh/config"* ]]
+}
+
+@test "~/.ssh/config is mode 600" {
+  need_bw_stub
+  is_windows && skip "no Unix modes on Windows"
+  init_desktop
+  stub_bw unlocked
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$SB_DEST/.ssh/config" 2>/dev/null || stat -f %Lp "$SB_DEST/.ssh/config")" = 600 ]
 }
 
 @test "settings-sync.jsonc lists every server extension" {
@@ -203,16 +249,35 @@ EOF
   [[ "$output" == *"/bin/bash -c"*"Homebrew/install"* ]]
 }
 
-@test "mac server script brew-installs the darwin cli_tools only for desktop+server" {
+@test "mac cli tools script brew-installs the darwin cli_tools only for desktop+server" {
   init_desktop desktop
-  f="$(render_for darwin run_onchange_after_75-mac-server.sh.tmpl)"
+  f="$(render_for darwin run_onchange_after_12-mac-cli-tools.sh.tmpl)"
   [ -z "$(tr -d '[:space:]' < "$f")" ]
   rm -rf "$SB/cache" "$SB_CONFIG"; mkdir -p "$SB_CACHE"
   init_desktop "desktop+server"
-  f="$(render_for darwin run_onchange_after_75-mac-server.sh.tmpl)"
+  f="$(render_for darwin run_onchange_after_12-mac-cli-tools.sh.tmpl)"
   sh -n "$f"
   for p in fish tmux fzf fd bat ripgrep jq gh git-lfs; do grep -q "^brew_formula $p\$" "$f"; done
   ! grep -q 'fd-find' "$f"
+}
+
+@test "mac cli tools run before fish plugins and node; fish plugins see Homebrew on PATH" {
+  ls "$REPO_ROOT/home/.chezmoiscripts" | grep -E '^run_onchange_after_[0-9]+' | sort > "$SB/order"
+  first="$(grep -nE '12-mac-cli-tools|20-fish-plugins|20-node|30-uv-tools' "$SB/order" | head -n1)"
+  [[ "$first" == *"12-mac-cli-tools"* ]]
+  init_desktop "desktop+server"
+  f="$(render_for darwin run_onchange_after_20-fish-plugins.sh.tmpl)"
+  sh -n "$f"
+  grep -q '/opt/homebrew/bin' "$f"
+}
+
+@test "node script renders on a plain macOS desktop so 25-bw has npm" {
+  init_desktop desktop
+  f="$(render_for darwin run_onchange_after_20-node.sh.tmpl)"
+  sh -n "$f"
+  grep -q 'fnm-macos.zip' "$f"
+  f="$(render_for darwin run_onchange_after_25-bw.sh.tmpl)"
+  grep -q 'npm install -g' "$f"
 }
 
 @test "node and uv tools scripts also render for macOS desktop+server" {
@@ -264,6 +329,49 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS a"* ]]
   [[ "$output" == *"WARN b: advisory"* ]]
+}
+
+@test "doctor: server-only checks SKIP on a desktop role, run on a server role" {
+  printf '[user]\n\temail = t@example.invalid\n' > "$SB_HOME/.gitconfig"   # git_user_email is role-independent
+  for c in 10 20 65; do
+    DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY="$c-*" run "$REPO_ROOT/bin/doctor" --ci
+    echo "$output"
+    [ "$status" -eq 0 ]
+    ! grep -q '^FAIL' <<<"$output"
+  done
+  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='20-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"SKIP fish_present: server role only (role: desktop)"* ]]
+  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"SKIP codex_installed: server role only"* ]]
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"SKIP claude_mcp: server role only"* ]]
+  [[ "$output" == *"SKIP claude_skills: server role only"* ]]
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"codex_installed"* ]]
+  [[ "$output" != *"server role only"* ]]
+}
+
+@test "doctor.ps1 takes the role from DEVENV_ROLE" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  mkdir -p "$SB/r/bin" "$SB/r/doctor.d"
+  cp "$REPO_ROOT/bin/doctor.ps1" "$SB/r/bin/"
+  cat > "$SB/r/doctor.d/10-x.ps1" <<'EOF'
+function check_srv { return (Test-DoctorServerOnly) }
+Register 'check_srv'
+EOF
+  DEVENV_ROLE=desktop run pwsh -NoProfile -File "$SB/r/bin/doctor.ps1" -Ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"SKIP srv: server role only (role: desktop)"* ]]
+  DEVENV_ROLE=server run pwsh -NoProfile -File "$SB/r/bin/doctor.ps1" -Ci
+  [[ "$output" == *"PASS srv"* ]]
+}
+
+@test "windows chezmoi config runs ps1 scripts with ExecutionPolicy Bypass" {
+  grep -q 'interpreters.ps1' "$REPO_ROOT/home/.chezmoi.toml.tmpl"
+  grep -qF '"-ExecutionPolicy", "Bypass"' "$REPO_ROOT/home/.chezmoi.toml.tmpl"
+  grep -q 'Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force' "$REPO_ROOT/bootstrap.ps1"
+  if ! is_windows; then init_desktop; ! grep -q interpreters "$SB_CONFIG"; fi
 }
 
 @test "doctor desktop checks register only on macOS" {

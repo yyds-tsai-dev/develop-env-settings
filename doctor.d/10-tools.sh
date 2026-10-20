@@ -9,6 +9,7 @@ _tools_linux() {
 _tools_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
 check_micromamba_envs() {
+  doctor_server_only || return
   _tools_linux || return
   local e missing=
   [ -x "$HOME/.local/bin/micromamba" ] || { echo "~/.local/bin/micromamba missing"; return 1; }
@@ -21,6 +22,7 @@ check_micromamba_envs() {
 register check_micromamba_envs
 
 check_cli_tools_linked() {
+  doctor_server_only || return
   _tools_linux || return
   local b missing=
   for b in fzf fd bat rg jq gh git-lfs pdftotext; do
@@ -32,6 +34,7 @@ check_cli_tools_linked() {
 register check_cli_tools_linked
 
 check_node_default() {
+  doctor_server_only || return
   _tools_linux || return
   local fnm major v
   fnm="$(command -v fnm 2>/dev/null || echo "$HOME/.local/bin/fnm")"
@@ -46,6 +49,7 @@ check_node_default() {
 register check_node_default
 
 check_uv_tools() {
+  doctor_server_only || return
   _tools_linux || return
   local uv list t missing=
   uv="$(command -v uv 2>/dev/null || echo "$HOME/.local/bin/uv")"

@@ -1,5 +1,6 @@
 # Claude Code checks (install, plugins, MCP servers, skills, login).
-# Protocol: see bin/doctor. --ci: login is SKIP.
+# Protocol: see bin/doctor. --ci: login is SKIP. MCP servers and skills depend
+# on the Server uv tools, so those two SKIP on a plain Desktop.
 
 _claude_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
@@ -48,6 +49,7 @@ register check_claude_plugins
 # Every manifest server must be registered and connect (`claude mcp list` runs
 # a health check: "✔ Connected" or "✘ Failed to connect ...").
 check_claude_mcp() {
+  doctor_server_only || return
   local list line n missing= failed=
   _claude_present || return 1
   list="$(claude mcp list 2>/dev/null)"
@@ -65,6 +67,7 @@ check_claude_mcp() {
 register check_claude_mcp
 
 check_claude_skills() {
+  doctor_server_only || return
   local d missing=
   for d in $(_claude_names skills dir); do
     [ -f "$HOME/.claude/skills/$d/SKILL.md" ] || missing="$missing $d"
