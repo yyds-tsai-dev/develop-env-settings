@@ -26,15 +26,30 @@ jobs:
         # bootstrap.bats and the claude docker test skip themselves off Linux; on ubuntu they run in the docker step below.
         env:
           DEVENV_SKIP_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
-        run: .tools/bin/bats tests/bats
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap tests/bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "bats"
+          exit "$rc"
       - name: docker server bootstrap
         if: runner.os == 'Linux'
         timeout-minutes: 75
-        run: .tools/bin/bats -T tests/bats/bootstrap.bats
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap -T tests/bats/bootstrap.bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "docker server bootstrap"
+          exit "$rc"
       - name: docker claude install
         if: runner.os == 'Linux'
         timeout-minutes: 75
-        run: .tools/bin/bats -T --filter-tags docker tests/bats/claude.bats
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap -T --filter-tags docker tests/bats/claude.bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "docker claude install"
+          exit "$rc"
       - name: pytest
         run: |
           if [ -d tests/py ]; then
