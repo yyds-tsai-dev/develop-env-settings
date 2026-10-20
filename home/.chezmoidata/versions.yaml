@@ -1,4 +1,4 @@
-resolved_at: '2026-10-20T07:36:21Z'
+resolved_at: '2026-10-20T07:38:10Z'
 versions:
   bat: 0.26.1
   bw: 2026.10.0
@@ -20,5 +20,5 @@ versions:
   poppler: 26.09.0
   ripgrep: 15.2.0
   semble: 0.7.0
-  tmux: 3.6b
+  tmux: '3.8_'
   uv: 0.13.3

@@ -141,9 +141,9 @@ def test_tag_without_declared_prefix_warns_and_keeps_old():
 
 def test_conda_invalid_version_string_rejected():
     files = lambda *vs: {"files": [{"version": v, "attrs": {"subdir": d}} for v, d in vs]}  # noqa: E731
-    only_bad = files(("3.8_", "linux-64"))
+    only_bad = files(("garbage", "linux-64"), ("", "noarch"))
     assert rv.fetch_latest("conda-forge:tmux", client=_Client(only_bad)) is None
-    mixed = files(("3.8_", "linux-64"), ("3.5a", "linux-64"), ("3.4", "noarch"), ("9.9", "osx-arm64"))
+    mixed = files(("garbage", "linux-64"), ("3.5a", "linux-64"), ("3.4", "noarch"), ("9.9", "osx-arm64"))
     assert rv.fetch_latest("conda-forge:tmux", client=_Client(mixed)) == "3.5a"
 
 
@@ -157,3 +157,9 @@ def test_removed_manifest_entry_pruned():
 def test_unknown_only_warns():
     _, warns = rv.resolve(MANIFEST, {}, lambda s: "1", only=["nope"])
     assert any("nope" in w for w in warns)
+
+
+def test_conda_trailing_underscore_is_latest():
+    files = {"files": [{"version": v, "attrs": {"subdir": "linux-64"}}
+                       for v in ("3.6b", "3.7c_", "3.8_", "3.7_", "", "junk")]}
+    assert rv.fetch_latest("conda-forge:tmux", client=_Client(files)) == "3.8_"

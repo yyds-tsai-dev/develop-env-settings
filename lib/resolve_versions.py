@@ -27,11 +27,11 @@ def entries(manifest):
     return [e for g in groups for e in (g or [])]
 
 
-_CONDA_VERSION = re.compile(r"^\d+(\.\d+)*[a-z]?\d*$")
+_CONDA_VERSION = re.compile(r"^\d+(\.\d+)*[a-z]?\d*_?$")
 
 
 def _conda_key(v):
-    m = re.match(r"^(\d+(?:\.\d+)*)([a-z]?)(\d*)$", v)
+    m = re.match(r"^(\d+(?:\.\d+)*)([a-z]?)(\d*)_?$", v)
     return (tuple(int(x) for x in m.group(1).split(".")), m.group(2), int(m.group(3) or 0))
 
 
