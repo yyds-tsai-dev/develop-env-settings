@@ -77,7 +77,8 @@ is_windows() { case "$HOST_OS" in MINGW*|MSYS*|CYGWIN*) return 0;; *) return 1;;
   [ "$status" -eq 0 ]
   dest="${lines[${#lines[@]}-1]}"
   [ -f "$dest/.config/develop-env/README" ]
-  [ -z "$(find "$REAL_HOME" -maxdepth 3 -newer "$SB/marker" -not -path "$SB/*" -not -path "$REAL_HOME/.claude*" -not -path "$REAL_HOME/.codex*" 2>/dev/null | head -n1)" ]
+  touched="$(find "$REAL_HOME" -mindepth 1 -maxdepth 3 -type f -newer "$SB/marker" -not -path "$SB/*" -not -path "$REAL_HOME/.claude*" -not -path "$REAL_HOME/.codex*" 2>/dev/null | head -n3)"
+  [ -z "$touched" ] || { echo "real home touched: $touched" >&2; false; }
 }
 
 @test "no managed file contains an absolute home path" {
