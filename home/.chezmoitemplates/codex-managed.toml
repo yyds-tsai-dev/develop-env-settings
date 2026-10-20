@@ -2,8 +2,10 @@
        (modify_private_config.toml.tmpl). MCP servers come from the Manifest at
        locked versions with bare commands; every server carries tool_timeout_sec.
        Everything not listed here (projects, hooks.state, ...) stays machine-local. */ -}}
+# Unmanaged, kept machine-local: marketplaces.openai-bundled, plugins."visualize@openai-bundled", [projects.*], hooks.state.
 model = "gpt-6-astra"
 model_context_window = 1000000
+model_auto_compact_token_limit = 400000
 model_reasoning_effort = "medium"
 approvals_reviewer = "user"
 {{- range .mcp }}

@@ -6,6 +6,10 @@ versions:
   codebase-memory-mcp: 0.12.1
   codex: 0.163.0
   codex-bundle-academic-research-skills: 3.23.1
+  codex-bundle-adhd: 7b91ce601ed9
+  codex-bundle-caveman: bad48a0e1df5
+  codex-bundle-drawio: 307725c33184
+  codex-bundle-mattpocock-skills: 5beb35b040e3
   codex-bundle-superpowers: 7.0.0
   fd-find: 10.5.0
   fish: 4.9.3

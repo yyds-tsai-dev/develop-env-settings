@@ -64,6 +64,13 @@ def fetch_latest(source, client=None):
                 if not tag.startswith(prefix):
                     raise ValueError(f"tag {tag} lacks prefix {prefix}")
                 return tag[len(prefix):]
+        elif kind == "github-head":
+            # "owner/repo[@branch]": the branch head (default branch: HEAD) as a 12-char SHA
+            ref, _, branch = ref.partition("@")
+            url = f"https://api.github.com/repos/{ref}/commits/{branch or 'HEAD'}"
+
+            def pick(j):
+                return j["sha"][:12]
         elif kind == "conda-forge":
             # latest_version can be a non-installable string; take the highest valid version
             # that has a real linux-64 or noarch build
@@ -71,7 +78,7 @@ def fetch_latest(source, client=None):
         else:
             return None
         headers = {}
-        if kind == "github" and os.environ.get("GITHUB_TOKEN"):
+        if kind in ("github", "github-head") and os.environ.get("GITHUB_TOKEN"):
             headers["Authorization"] = "Bearer " + os.environ["GITHUB_TOKEN"]
         r = client.get(url, timeout=TIMEOUT, follow_redirects=True, headers=headers)
         r.raise_for_status()

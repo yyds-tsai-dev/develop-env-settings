@@ -172,3 +172,26 @@ def test_conda_trailing_underscore_is_latest():
     files = {"files": [{"version": v, "attrs": {"subdir": "linux-64"}}
                        for v in ("3.6b", "3.7c_", "3.8_", "3.7_", "", "junk")]}
     assert rv.fetch_latest("conda-forge:tmux", client=_Client(files)) == "3.8_"
+
+
+def test_github_head_returns_short_default_branch_sha():
+    sha = "307725c33184e2b7d4a1c9f0e8d7c6b5a4938271"
+    c = _Client({"sha": sha})
+    assert rv.fetch_latest("github-head:jgraph/drawio-mcp", client=c) == sha[:12]
+    assert c.urls == ["https://api.github.com/repos/jgraph/drawio-mcp/commits/HEAD"]
+    c = _Client({"sha": sha})
+    assert rv.fetch_latest("github-head:owner/repo@dev", client=c) == sha[:12]
+    assert c.urls == ["https://api.github.com/repos/owner/repo/commits/dev"]
+    assert rv.fetch_latest("github-head:owner/repo", client=_Client({})) is None
+
+
+def test_github_head_bundles_in_real_manifest_resolve_through_resolve():
+    m = yaml.safe_load((Path(__file__).resolve().parents[2] / "home/.chezmoidata/manifest.yaml").read_text())
+    heads = {b["name"]: b["source"] for b in m["codex"]["skill_bundles"] if b["source"].startswith("github-head:")}
+    assert set(heads) == {"codex-bundle-drawio", "codex-bundle-caveman", "codex-bundle-adhd",
+                          "codex-bundle-mattpocock-skills"}
+    seen = []
+    lock, warns = rv.resolve({"codex": {"skill_bundles": [
+        {"name": n, "source": s} for n, s in heads.items()]}}, {}, lambda s: seen.append(s) or "abcdef012345")
+    assert sorted(seen) == sorted(heads.values()) and warns == []
+    assert set(lock.values()) == {"abcdef012345"}

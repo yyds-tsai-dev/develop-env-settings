@@ -120,10 +120,11 @@ link_skill() {
     fi
     echo "skill $name" >> "$state"
 }
-# bundle NAME DIR REPO REF SKILLS_DIR [PATH]...: fetch and link one bundle;
-# with SKILLS_DIR every child holding a SKILL.md is linked, else each PATH.
+# bundle NAME DIR REPO REF SKILLS_DIR SKILLS_JSON [PATH]...: fetch and link one
+# bundle: every child of SKILLS_DIR holding a SKILL.md, every "./<path>" in the
+# "skills" list of SKILLS_JSON (a plugin.json in the bundle), and each PATH.
 bundle() {
-    bn="$1" bd="$2" brepo="$3" bref="$4" bsdir="$5"; shift 5
+    bn="$1" bd="$2" brepo="$3" bref="$4" bsdir="$5" bjson="$6"; shift 6
     fetch_bundle "$bd" "$brepo" "$bref" || return 0
     bok=1
     if [ -n "$bsdir" ]; then
@@ -135,8 +136,13 @@ bundle() {
         done
         [ "$bcount" -gt 0 ] || { warn "bundle $bn: no skills under $bsdir"; bok=; }
     fi
+    if [ -n "$bjson" ]; then
+        bpaths="$(sed -n '/"skills" *: *\[/,/\]/s/^ *"\.\/\([^"]*\)",\{0,1\} *$/\1/p' "$B/$bd/$bjson" 2>/dev/null)"
+        [ -n "$bpaths" ] || { warn "bundle $bn: no skills listed in $bjson"; bok=; }
+        for bp in $bpaths; do link_skill "$bd" "$bp" || bok=; done
+    fi
     for bp in "$@"; do link_skill "$bd" "$bp" || bok=; done
-    [ -n "$bok" ] && echo "bundle $bn" >> "$state"
+    [ -n "$bok" ] && echo "bundle $bn $bd" >> "$state"
     return 0
 }
 {{- range .codex.skill_bundles }}
@@ -145,12 +151,12 @@ bundle() {
 warn {{ printf "%s: no locked version; skipped (run bin/update)" .name | squote }}
 {{- else }}
 {{- $dir := printf "%s-%s" .bundle ($v | default (trunc 12 .ref)) }}
-bundle {{ .name | squote }} {{ $dir | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ index . "skills_dir" | default "" | squote }}
+bundle {{ .name | squote }} {{ $dir | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ index . "skills_dir" | default "" | squote }} {{ index . "skills_json" | default "" | squote }}
 {{- range (index . "skills" | default list) }} {{ . | squote }}{{ end }}
 {{- end }}
 {{- end }}
 
-# Expected skills for Doctor (65-codex): "bundle <name>" and "skill <dir>" lines.
+# Expected skills for Doctor (65-codex): "bundle <name> <dir>" and "skill <dir>" lines.
 cat "$state" > "$B/.devenv-skills" || warn "cannot write $B/.devenv-skills"
 rm -f "$state"
 exit 0

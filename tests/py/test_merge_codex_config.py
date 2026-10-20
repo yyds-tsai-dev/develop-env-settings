@@ -97,3 +97,73 @@ def test_main_reads_stdin_writes_stdout(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO(LIVE))
     assert mcc.main(["merge_codex_config.py", str(frag)]) == 0
     assert capsys.readouterr().out == mcc.merge(LIVE, MANAGED)
+
+
+def test_dotted_mcp_key_does_not_capture_later_keys():
+    src = ('mcp_servers.old.command = "x"\nservice_tier = "default"\n'
+           '[projects."/p"]\ntrust_level = "trusted"\n')
+    out = mcc.merge(src, MANAGED)
+    got = load(out)
+    assert got["service_tier"] == "default"
+    assert got["projects"] == {"/p": {"trust_level": "trusted"}}
+    assert got["mcp_servers"] == load(MANAGED)["mcp_servers"]
+    assert mcc.merge(out, MANAGED) == out
+
+
+def test_inline_table_merged_key_by_key():
+    out = load(mcc.merge('tui = { status_line_use_colors = true }\n', MANAGED))
+    assert out["tui"]["status_line_use_colors"] is True
+    assert out["tui"]["status_line"] == load(MANAGED)["tui"]["status_line"]
+
+
+def test_safety_check_trips_on_lost_key():
+    good = mcc.merge(LIVE, MANAGED)
+    mcc.check(LIVE, MANAGED, good)  # no error
+    lost = good.replace('service_tier = "default"\n', "")
+    try:
+        mcc.check(LIVE, MANAGED, lost)
+    except ValueError as e:
+        assert "service_tier" in str(e)
+    else:
+        raise AssertionError("lost key not detected")
+    moved = good.replace('service_tier = "default"\n', "") + '\n[tui.x]\nservice_tier = "default"\n'
+    try:
+        mcc.check(LIVE, MANAGED, moved)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("moved key not detected")
+    wrong = good.replace('approvals_reviewer = "user"', 'approvals_reviewer = "x"')
+    try:
+        mcc.check(LIVE, MANAGED, wrong)
+    except ValueError as e:
+        assert "approvals_reviewer" in str(e)
+    else:
+        raise AssertionError("wrong managed value not detected")
+
+
+def test_main_exits_nonzero_when_check_fails(tmp_path, monkeypatch, capsys):
+    import io
+    frag = tmp_path / "codex-managed.toml"
+    frag.write_text(MANAGED)
+    monkeypatch.setattr(mcc, "check", lambda *a: (_ for _ in ()).throw(ValueError("boom")))
+    monkeypatch.setattr(sys, "stdin", io.StringIO(LIVE))
+    try:
+        rc = mcc.main(["merge_codex_config.py", str(frag)])
+    except ValueError:
+        rc = 1
+    assert rc != 0
+    assert capsys.readouterr().out == ""   # nothing half-written to stdout
+
+
+def test_one_pass_fixpoint_for_hook_tables():
+    for src in ('[hooks.state."/x/config.toml:session_start:0:0"]\ntrusted_hash = "sha256:00"\n',
+                '[[hooks.PreToolUse]]\nmatcher = "*"\n\n[[hooks.PreToolUse.hooks]]\n'
+                'type = "command"\ncommand = "x"\n',
+                LIVE):
+        once = mcc.merge(src, MANAGED)
+        assert mcc.merge(once, MANAGED) == once
+        assert "\n\n\n" not in once
+        got = load(once)
+        if "PreToolUse" in src:
+            assert got["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "x"

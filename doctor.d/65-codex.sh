@@ -23,6 +23,16 @@ _codex_bundles() {
        c && s && match($0, /^    - \{ name: *[^,} ]+/) { v = substr($0, RSTART, RLENGTH); sub(/.*name: */, "", v); print v }' "$(_codex_manifest)"
 }
 
+# _codex_bundle_plugins: "<name>|<claude_plugin>|<plugin_json>" per bundle that has both.
+_codex_bundle_plugins() {
+  awk '/^codex:/ { c = 1; next } /^[a-z_]+:/ { c = 0 }
+       c && /^    - \{ name:/ && /claude_plugin:/ && /plugin_json:/ {
+         n = $0; sub(/.*name: */, "", n); sub(/[,} ].*/, "", n)
+         p = $0; sub(/.*claude_plugin: *"?/, "", p); sub(/["},].*/, "", p)
+         j = $0; sub(/.*plugin_json: *"?/, "", j); sub(/["}, ].*/, "", j)
+         print n "|" p "|" j }' "$(_codex_manifest)"
+}
+
 # _codex_skill_dirs: claude.skills dirs that are also fetched for codex.
 _codex_skill_dirs() {
   awk '/^  skills:/ { s = 1; next } /^[a-z_]+:/ || /^  [a-z_]+:/ { s = 0 }
@@ -62,7 +72,7 @@ check_codex_skills() {
   local sk="$HOME/.codex/skills" st="$HOME/.codex/skill-bundles/.devenv-skills"
   local b d kind name missing= broken= abs=
   [ -f "$st" ] || { echo "$st missing (rerun apply: run_onchange_after_55-codex)"; return 1; }
-  for b in $(_codex_bundles); do grep -qx "bundle $b" "$st" || missing="$missing $b"; done
+  for b in $(_codex_bundles); do grep -q "^bundle $b " "$st" || missing="$missing $b"; done
   for d in codex-queue-workflow codebase-memory $(_codex_skill_dirs); do
     grep -qx "skill $d" "$st" || [ "$d" = codex-queue-workflow ] || missing="$missing $d"
   done
@@ -81,6 +91,32 @@ check_codex_skills() {
   return 1
 }
 register check_codex_skills
+
+# WARN (never FAIL) when a bundle's plugin.json version (its 12-char SHA when the
+# file has none) differs from the version of Claude's installed plugin for the
+# same upstream: the two clients have drifted apart.
+check_codex_bundle_versions() {
+  local st="$HOME/.codex/skill-bundles/.devenv-skills" reg="$HOME/.claude/plugins/installed_plugins.json"
+  local name plugin pj dir cv clv drift=
+  [ -f "$st" ] || { echo "no $st yet"; return 2; }
+  [ -f "$reg" ] || { echo "no Claude plugins installed"; return 2; }
+  while IFS='|' read -r name plugin pj; do
+    dir="$(sed -n "s/^bundle $name //p" "$st")"
+    [ -n "$dir" ] || continue
+    cv="$(sed -n 's/^ *"version": *"\([^"]*\)".*/\1/p' "$HOME/.codex/skill-bundles/$dir/$pj" 2>/dev/null | head -n 1)"
+    [ -n "$cv" ] || cv="${dir##*-}"
+    clv="$(awk -v id="\"$plugin\": [" 'index($0, id) { f = 1; next }
+             f && /"version":/ { sub(/.*"version": *"/, ""); sub(/".*/, ""); print; exit }' "$reg")"
+    [ -n "$clv" ] || continue
+    [ "$cv" = "$clv" ] || drift="$drift $name(codex $cv, claude $clv)"
+  done <<DEVENV_BUNDLES
+$(_codex_bundle_plugins)
+DEVENV_BUNDLES
+  [ -z "$drift" ] && return 0
+  echo "Codex bundle and Claude plugin versions differ:$drift (run bin/update; claude plugin update <plugin>)"
+  return 3
+}
+register check_codex_bundle_versions
 
 check_codex_login() {
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "login check skipped in --ci"; return 2; fi

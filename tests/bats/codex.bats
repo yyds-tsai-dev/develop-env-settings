@@ -87,6 +87,7 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   grep -qx 'model_reasoning_effort = "medium"' "$f"
   grep -qx 'approvals_reviewer = "user"' "$f"
   grep -qx 'model_context_window = 1000000' "$f"
+  grep -qx 'model_auto_compact_token_limit = 400000' "$f"
   grep -qF 'status_line = ["model-with-reasoning",' "$f"
   n=0
   for s in $(codex_mcp_names); do
@@ -148,11 +149,16 @@ fake_world() {
   local f="$1"
   mkdir -p "$SB/repos"
   bundle() {
-    local r="$SB/repos/${3%%/*}_${3#*/}" sdir="$5"; shift 5
+    local r="$SB/repos/${3%%/*}_${3#*/}" sdir="$5" json="$6"; shift 6
     mkdir -p "$r"
     if [ -n "$sdir" ]; then
       for s in alpha beta; do mkdir -p "$r/$sdir/$s"; echo "$s" > "$r/$sdir/$s/SKILL.md"; done
       mkdir -p "$r/$sdir/not-a-skill"; echo x > "$r/$sdir/not-a-skill/README.md"
+    fi
+    if [ -n "$json" ]; then   # a plugin.json listing three skills, plus one unlisted
+      mkdir -p "$r/${json%/*}"
+      printf '{\n  "name": "x",\n  "version": "9.9.9",\n  "keywords": [\n    "tdd"\n  ],\n  "skills": [\n    "./skills/eng/tdd",\n    "./skills/eng/to-spec",\n    "./skills/prod/grilling"\n  ]\n}\n' > "$r/$json"
+      for p in skills/eng/tdd skills/eng/to-spec skills/prod/grilling skills/eng/unlisted; do mkdir -p "$r/$p"; echo "$p" > "$r/$p/SKILL.md"; done
     fi
     for p in "$@"; do mkdir -p "$r/$p"; echo "$p" > "$r/$p/SKILL.md"; done
   }
@@ -207,7 +213,7 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
   st="$SB_HOME/.codex/skill-bundles/.devenv-skills"
   [ -s "$st" ]
   for b in $(sed -n 's/^bundle \x27\([^\x27]*\)\x27.*/\1/p' "$SB/codex.sh"); do
-    grep -qx "bundle $b" "$st" || { echo "bundle $b not recorded"; false; }
+    grep -q "^bundle $b [a-z]" "$st" || { echo "bundle $b not recorded"; false; }
   done
   n=0
   while read -r kind name; do
@@ -218,12 +224,17 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
     fi
     n=$((n + 1))
   done < "$st"
-  [ "$n" -ge 36 ]
+  [ "$n" -ge 14 ]
+  [ ! -e "$sk/unlisted" ]
   [ ! -e "$sk/not-a-skill" ]
-  [ "$(readlink "$sk/caveman")" = "../skill-bundles/caveman-ae405e872270/skills/caveman" ]
-  [ "$(readlink "$sk/tdd")" = "../skill-bundles/mattpocock-skills-959a8e9f1edc/skills/engineering/tdd" ]
+  [ "$(readlink "$sk/caveman")" = "../skill-bundles/caveman-$(lock codex-bundle-caveman)/skills/caveman" ]
+  [ "$(readlink "$sk/tdd")" = "../skill-bundles/mattpocock-skills-$(lock codex-bundle-mattpocock-skills)/skills/eng/tdd" ]
+  [ "$(readlink "$sk/grilling")" = "../skill-bundles/mattpocock-skills-$(lock codex-bundle-mattpocock-skills)/skills/prod/grilling" ]
+  # github-head bundles fetch the locked 12-char SHA
+  grep -qx "https://codeload.github.com/jgraph/drawio-mcp/tar.gz/$(lock codex-bundle-drawio)" "$SB/curl.log"
+  [ "$(lock codex-bundle-drawio | wc -c)" -eq 13 ]
   [ "$(readlink "$sk/academic-paper")" = "../skill-bundles/academic-research-skills-$(lock codex-bundle-academic-research-skills)/academic-paper" ]
-  [ "$(readlink "$sk/alpha")" = "../skill-bundles/drawio-1.2.5/plugins/codex/drawio/skills/alpha" ] \
+  [ "$(readlink "$sk/alpha")" = "../skill-bundles/drawio-$(lock codex-bundle-drawio)/plugins/codex/drawio/skills/alpha" ] \
     || [ "$(readlink "$sk/alpha")" = "../skill-bundles/superpowers-$(lock codex-bundle-superpowers)/skills/alpha" ]
   ls "$SB_HOME/.codex/skill-bundles/.replaced/" | grep -q '^caveman\.'   # moved aside, not deleted
   [ -d "$sk/.system/x" ]
@@ -297,6 +308,23 @@ EOF
   [ "$status" -eq 0 ]
   for c in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $c"* ]]; done
   [[ "$output" == *"SKIP codex_login"* ]]
+  [[ "$output" == *"SKIP codex_bundle_versions"* ]]   # no Claude plugins
+  # Claude plugin versions: same as the bundles -> PASS; one differs -> WARN, exit 0
+  mkdir -p "$SB_HOME/.claude/plugins"
+  reg() {
+    printf '{\n  "version": 2,\n  "plugins": {\n    "mattpocock-skills@claude-plugins-official": [\n      {\n        "scope": "user",\n        "version": "%s"\n      }\n    ],\n    "caveman@caveman": [\n      {\n        "version": "%s"\n      }\n    ]\n  }\n}\n' "$1" "$2" > "$SB_HOME/.claude/plugins/installed_plugins.json"
+  }
+  reg 9.9.9 "$(lock codex-bundle-caveman)"
+  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS codex_bundle_versions"* ]]
+  reg 1.0.0 "$(lock codex-bundle-caveman)"
+  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN codex_bundle_versions: Codex bundle and Claude plugin versions differ: codex-bundle-mattpocock-skills(codex 9.9.9, claude 1.0.0)"* ]]
+  [[ "$output" != *caveman\(* ]]
   HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL codex_login"* ]]
@@ -314,11 +342,23 @@ EOF
   [[ "$output" == *"FAIL codex_skills"*"tdd"* ]]
   [[ "$output" == *"absolute link: caveman"* ]]
   # a bundle that never installed FAILs
-  sed -i '/^bundle codex-bundle-adhd$/d' "$SB_HOME/.codex/skill-bundles/.devenv-skills"
+  sed -i '/^bundle codex-bundle-adhd /d' "$SB_HOME/.codex/skill-bundles/.devenv-skills"
   HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"codex-bundle-adhd"* ]]
   # no codex at all
   rm "$STUB/codex"
   HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"FAIL codex_installed"* ]]
+}
+
+@test "modify script keeps the current file when the post-merge check trips" {
+  command -v uv >/dev/null 2>&1 || skip "uv needed for the merge"
+  render_tmpl "$MODIFY" "$SB/modify.sh"
+  # collapsing blank lines would change this multi-line string: the check refuses
+  printf 'note = """a\n\n\n\nb"""\nservice_tier = "default"\n' > "$SB/cur.toml"
+  HOME="$SB_HOME" run --separate-stderr sh "$SB/modify.sh" < "$SB/cur.toml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$SB/cur.toml")" ]
+  [[ "$stderr" == *"merged config lost or changed: note"* ]]
+  [[ "$stderr" == *"warning: merging the managed Codex config failed"* ]]
 }
