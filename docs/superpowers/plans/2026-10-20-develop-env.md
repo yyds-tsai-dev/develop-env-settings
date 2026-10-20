@@ -26,6 +26,7 @@
   Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_014DNfNamdWDVDvkwPck2oyK
   ```
+- **Local disk for execution:** the NAS home is slow (open() 0.2–0.35 s). Work in a clone at `/tmp/devenv-work/develop-env-settings` (local disk) whose remote `nas` is `~/develop-env-settings`; set `UV_CACHE_DIR=/tmp/devenv-work/uv-cache`; Docker bind mounts come from `/tmp/devenv-work`. Push commits back to `nas` at each task boundary.
 - **Git:** all work is on branch `init`. Commit at each task boundary. Never push and never open a PR; the scheduler does both after asking the person.
 
 ## Review Focus
@@ -33,8 +34,9 @@
 1. **Running Bootstrap twice:** the second run changes nothing. No duplicate `authorized_keys` line, PATH entry, MCP registration or plugin, and no new SSH key. Tested in Task 4 (Docker double run) and Task 5 (merge idempotence).
 2. **A Server whose home already holds a different, unmanaged `~/.bashrc`, `~/.config/fish` or `~/.codex/config.toml`:** chezmoi replaces the managed files, but machine-local Codex sections (`[projects.*]`, `hooks.state`) and every existing `authorized_keys` line survive. Tested in Tasks 5 and 8.
 3. **Bitwarden absent or locked:** apply still succeeds, prints one warning per skipped file, and leaves no empty or partial `.env` or `~/.ssh/config`. Tested in Task 6.
-4. **Shared home:** a second Server on the same mount runs only the machine-local steps and does not reinstall micromamba envs, uv tools or Node. Tested in Task 4.
+4. **Shared home:** on a home mounted over NFS, Bootstrap never runs `chezmoi apply` (that would rewrite every machine on the mount); it runs only `bin/machine-local` (SSH key, `known_hosts`, VS Code server extensions) unless the person passes `--apply-shared-home` by hand. Tested in Task 4.
 5. **No network to one upstream** (PyPI, npm or GitHub down) during resolve: the resolver keeps the previous lock value for that entry, warns, and exits 0. It does not write an empty version. Tested in Task 3.
+6. **Fresh-machine lock drift:** the resolver dirties `versions.yaml` in the chezmoi source clone; a later `bin/update` must not fail on a pull conflict over that file. Tested in Task 4.
 
 ---
 
@@ -70,8 +72,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   - `.ci`: bool, true when env `CI=true`.
 - **Shared-home rule:**
   - Linux only.
-  - `.sharedHome` is true when `stat -f -c %T $HOME` is `nfs` or `nfs4`, and the marker file `~/.local/state/develop-env/hosts` already lists a hostname other than the current one.
-  - Every apply appends the current hostname to that marker (Task 4).
+  - `.sharedHome` is true when `stat -f -c %T $HOME` is `nfs` or `nfs4` (filesystem type alone; no marker file).
 - **Manifest** (`manifest.yaml`). Every entry has `name` (the lock key), `source` (`pypi:<pkg>`, `npm:<pkg>`, `github:<owner>/<repo>`, `conda-forge:<pkg>`, or `none`), and optional `platforms` (subset of `linux`, `darwin`, `windows`). Top-level keys:
   - `cli_tools`: list. Linux: micromamba env `cli-tools`. macOS: brew. Windows: winget id via `winget:` field.
   - `pdftools`: list.
@@ -103,6 +104,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
 - [ ] **Step 1:** Write `scaffold.bats`:
   - `@test "role server sets isServer"` asserts `chezmoi execute-template '{{ .isServer }}'` prints `true`.
   - `@test "role desktop on linux is rejected"`: config init fails with a message containing `desktop role needs windows or darwin`.
+  - `@test "role desktop+server off darwin is rejected"`: message contains `desktop+server role needs darwin`.
   - `@test "no managed file contains an absolute home path"`: `grep -rE '/ldaphome|/home/[a-z]' home/ lib/ bin/ doctor.d/` finds nothing.
   - `@test "doctor exits 0 with only core checks"`.
 - [ ] **Step 2:** Run `tests/setup-tools.sh && .tools/bin/bats tests/bats/scaffold.bats`. Expected: FAIL.
@@ -190,7 +192,7 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   - `run_onchange_after_15-symlinks.sh.tmpl`: `~/.local/bin` links into the `cli-tools` and `pdftools` env `bin/`.
   - `run_onchange_after_20-node.sh.tmpl`: installs fnm, then `fnm install {node.major}` and `fnm default`.
   - `run_onchange_after_30-uv-tools.sh.tmpl`.
-  - `run_after_99-host-marker.sh.tmpl`.
+  - `bin/machine-local`: SSH key step (Task 5 script), `known_hosts` for github.com, VS Code server extensions fallback (Task 10); idempotent.
   - `doctor.d/10-tools.sh`.
   - `tests/docker/Dockerfile.server`: `ubuntu:22.04`, curl, git and ca-certificates added at image build, then a non-root user `dev` with no sudo.
   - `tests/bats/bootstrap.bats`.
@@ -204,19 +206,21 @@ AGENTS.md  CLAUDE.md -> AGENTS.md  README.md
   4. `chezmoi apply`.
   5. Run `bin/doctor`.
 
-  `bin/update` is `chezmoi update` plus resolve, apply and doctor.
+  `bin/update` first runs `git -C <source> checkout -- home/.chezmoidata/versions.yaml`, then `chezmoi update`, resolve, apply and doctor.
+  When `.sharedHome` is true, `bootstrap.sh` and `bin/update` skip `chezmoi apply`, print `shared home: not applying dotfiles (pass --apply-shared-home to override)`, and run only `bin/machine-local`. `--apply-shared-home` is person-only and named so in AGENTS.md.
 - One-line Bootstrap (README):
 
   ```
   curl -fsSL https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.sh | sh
   ```
 
-  This replaces the bare chezmoi one-liner in the spec, so the resolve step runs between init and apply. Update `docs/spec.md` to match.
+  This replaces the bare chezmoi one-liner in the spec, so the resolve step runs between init and apply. `docs/spec.md` already says so.
 
 - [ ] **Step 1:** Write `bootstrap.bats`. Each test runs `docker run` on the image with the repo mounted read-only and `--source /repo --role server --ci`.
   - `@test "server bootstrap in container ends with doctor PASS"`.
   - `@test "second bootstrap changes nothing"`: `chezmoi diff` is empty, the PATH line count in `.bashrc` is unchanged, and `micromamba env list` has the same lines.
-  - `@test "shared home second host skips env installs"`: run the container twice on one named volume as `$HOME`, with different `--hostname` values and `stat` faked through `DEVENV_FAKE_FSTYPE=nfs4`. The second log contains `shared home: skipping micromamba envs` and does not contain `Transaction`.
+  - `@test "shared home: no managed dotfile written"`: with `DEVENV_FAKE_FSTYPE=nfs4`, after bootstrap `$HOME/.bashrc` is byte-identical to the image's original, `~/.config/fish/fish_plugins` does not exist, and the log contains `shared home: not applying dotfiles`.
+  - `@test "update after a dirty lock does not conflict"`: bootstrap, modify the lock in the source clone, advance the upstream fixture repo's lock, run `bin/update`; it exits 0.
   - `@test "missing bzip2 is printed as a command, not run"`.
 - [ ] **Step 2:** Run `.tools/bin/bats tests/bats/bootstrap.bats`. Expected: FAIL.
 - [ ] **Step 3:** Implement the files. The shared-home test hook `DEVENV_FAKE_FSTYPE` is read only when `.ci` is true.

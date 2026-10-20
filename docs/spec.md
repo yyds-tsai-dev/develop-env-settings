@@ -22,13 +22,13 @@ Out: project toolchains and secrets (DREAMPlace, OpenROAD, CUDA, Innovus, projec
 | Desktop + Server | macOS (opt-in) | Both, Server tools via Homebrew |
 | Server via WSL2 | Windows | Treated as a Linux Server |
 
-Shared home detection: if the home directory is already populated by another Server on the same network mount, only machine-local steps run (VS Code server extensions, SSH key, `known_hosts`).
+Shared home: when the home directory is on a network filesystem (NFS), Bootstrap never applies dotfiles, because that would change every machine mounting it; it runs only the machine-local steps (SSH key, `known_hosts`, VS Code server extensions). Applying dotfiles to a shared home needs an explicit override flag that only the person passes.
 
 Steps that need admin rights (system packages, Homebrew's first install, elevated winget) are never run automatically; Bootstrap prints the exact commands and continues.
 
 ## Mechanism
 
-- chezmoi source state in this repo; one-line Bootstrap: `sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply yyds-tsai-dev/develop-env-settings` (PowerShell equivalent on Windows).
+- chezmoi source state in this repo; one-line Bootstrap: `curl -fsSL https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.sh | sh` (Windows: `irm .../bootstrap.ps1 | iex`). The script installs chezmoi and uv, initialises, resolves the Version lock, applies, and runs Doctor.
 - Machine-specific overrides in untracked `*.local` files (`config.local.fish`, `~/.gitconfig.local`, ...).
 - Files that mix config with machine state are generated, never linked: `~/.claude.json` (MCP added via `claude mcp add`), `~/.codex/config.toml` (managed section; trust list, hook hashes and temp paths stay machine-local).
 - No absolute home paths in any managed file; MCP commands are bare (`uvx`, `npx`, `graphify-mcp`, ...) and rely on `~/.local/bin` being first on PATH.
