@@ -1,3 +1,4 @@
 .tools/
 .superpowers/
 __pycache__/
+statusline/*.exe
