@@ -15,6 +15,13 @@ stub_ssh() {  # stub_ssh TEXT: fake `ssh` that prints TEXT and exits 1 (like git
   printf '#!/bin/sh\necho "%s" >&2\nexit 1\n' "$1" > "$STUB/ssh"; chmod +x "$STUB/ssh"
 }
 
+# mode_is MODE PATH: GNU or BSD stat; Git Bash on Windows has no Unix modes, so
+# the check is skipped there.
+mode_is() {
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) return 0 ;; esac
+  [ "$(stat -c %a "$2" 2>/dev/null || stat -f %Lp "$2")" = "$1" ]
+}
+
 run_key() { HOME="$SB_HOME" PATH="$STUB:$PATH" run bash "$REPO_ROOT/lib/ssh-key.sh" "$@"; }
 
 @test "ssh-key creates the key once and never overwrites it" {
@@ -24,7 +31,7 @@ run_key() { HOME="$SB_HOME" PATH="$STUB:$PATH" run bash "$REPO_ROOT/lib/ssh-key.
   [[ "$output" == *"https://github.com/settings/ssh/new"* ]]
   [[ "$output" == *"GitHub SSH authentication works"* ]]
   fp1="$(ssh-keygen -lf "$SB_HOME/.ssh/id_ed25519.pub")"
-  [ "$(stat -c %a "$SB_HOME/.ssh")" = 700 ]
+  mode_is 700 "$SB_HOME/.ssh"
   run_key --ci
   [ "$status" -eq 0 ]
   [[ "$output" != *"Created"* ]]
@@ -70,8 +77,8 @@ render_server() {
   chezmoi_iso apply --exclude scripts --destination "$SB_DEST"
   f="$SB_DEST/.ssh/authorized_keys"
   [ -f "$f" ]
-  [ "$(stat -c %a "$f")" = 600 ]
-  [ "$(stat -c %a "$SB_DEST/.ssh")" = 700 ]
+  mode_is 600 "$f"
+  mode_is 700 "$SB_DEST/.ssh"
   grep -qF "$(cut -d' ' -f2 "$REPO_ROOT/ssh/authorized_keys.pub-list" | head -n1)" "$f"
 }
 
@@ -85,7 +92,7 @@ render_server() {
   f="$SB_DEST/.ssh/authorized_keys"
   [ "$(head -n1 "$f")" = "ssh-rsa AAAAB3other keep-me" ]
   [ "$(wc -l < "$f")" -eq 2 ]
-  [ "$(stat -c %a "$f")" = 600 ]
+  mode_is 600 "$f"
 }
 
 @test "authorized_keys merge falls back to python3 when uv is absent" {

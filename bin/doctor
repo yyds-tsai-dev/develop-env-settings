@@ -30,7 +30,8 @@ for f in "$ROOT"/doctor.d/*.sh; do
   esac
 done
 
-for name in "${DOCTOR_CHECKS[@]}"; do
+# ${a[@]+...}: bash 3.2 (macOS) treats an empty array as unbound under set -u.
+for name in ${DOCTOR_CHECKS[@]+"${DOCTOR_CHECKS[@]}"}; do
   label="${name#check_}"
   reason="$("$name" 2>&1)"; rc=$?
   case "$rc" in

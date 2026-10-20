@@ -13,9 +13,16 @@ README.md
 {{ end }}
 {{ if not .isDesktop }}
 .config/desktop
+.wezterm.lua
+.ssh/config
 {{ end }}
 
 {{- /* Secret-bearing targets: skipped (existing files stay untouched) unless bw-ready. One entry per target. */ -}}
 {{ if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".config/paper-search-mcp/.env" "item" "paper-search" "fields" (list "ieee_api_key" "unpaywall_email"))) }}
 .config/paper-search-mcp/.env
+{{ end }}
+{{ if .isDesktop }}
+{{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes"))) }}
+.ssh/config
+{{   end }}
 {{ end }}

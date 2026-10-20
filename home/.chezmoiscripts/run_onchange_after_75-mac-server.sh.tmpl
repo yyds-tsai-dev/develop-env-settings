@@ -1,0 +1,30 @@
+{{- if and .isServer .isDesktop (eq .chezmoi.os "darwin") -}}
+#!/bin/sh
+# macOS Desktop + Server: the manifest cli_tools for darwin through Homebrew
+# (latest formulae; Homebrew does not pin). Node (20-node), uv tools
+# (30-uv-tools), Claude Code (50-claude) and Codex (55-codex) run from the same
+# scripts as on a Linux Server. Warns and exits 0 on any failure.
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
+warn() { echo "warning: $*" >&2; }
+
+BREW="$(command -v brew 2>/dev/null)"
+if [ -z "$BREW" ]; then
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        [ -x "$b" ] && { BREW="$b"; break; }
+    done
+fi
+[ -n "$BREW" ] || { warn "Homebrew not found; skipping cli_tools (70-desktop printed the install command)"; exit 0; }
+
+brew_formula() {
+    "$BREW" list --formula "$1" >/dev/null 2>&1 && return 0
+    "$BREW" install "$1" || warn "brew install $1 failed"
+}
+{{  range .cli_tools }}
+{{- if or (not (hasKey . "platforms")) (has "darwin" .platforms) }}
+brew_formula {{ get . "brew" | default .name }}
+{{- end }}
+{{- end }}
+exit 0
+{{- end }}

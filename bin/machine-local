@@ -4,6 +4,8 @@
 #   - known_hosts: github.com host keys merged into ~/.ssh/known_hosts
 #     (a key already present, under any host field, is not added again).
 #   - GitHub SSH key: lib/ssh-key.sh (creates ~/.ssh/id_ed25519 once, checks GitHub).
+#   - VS Code server extensions: bin/vscode-server-extensions (acts only from a
+#     VS Code-connected terminal; otherwise prints that it skipped).
 set -u
 
 warn() { echo "warning: $*" >&2; }
@@ -31,4 +33,5 @@ EOT
 
 known_hosts_github
 bash "$(dirname "${BASH_SOURCE[0]}")/../lib/ssh-key.sh" "$@" || warn "ssh key step failed"
+bash "$(dirname "${BASH_SOURCE[0]}")/vscode-server-extensions" || warn "vscode server extensions step failed"
 exit 0

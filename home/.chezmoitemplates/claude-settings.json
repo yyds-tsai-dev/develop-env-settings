@@ -89,7 +89,7 @@ The cbm hooks call the wrapper scripts that installer writes to ~/.claude/hooks.
   },
   "statusLine": {
     "type": "command",
-    "command": "\"$HOME/.claude/statusline-bin\"",
+    "command": "\"$HOME/.claude/statusline-bin{{ if eq .chezmoi.os "windows" }}.exe{{ end }}\"",
     "refreshInterval": 60
   },
   "enabledPlugins": {
