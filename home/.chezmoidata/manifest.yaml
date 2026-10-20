@@ -1,8 +1,77 @@
-cli_tools: []
-pdftools: []
-uv_tools: []
-node: { major: 22 }
-mcp: []
-claude: { marketplaces: [], plugins: [] }
-codex: { skill_bundles: [] }
-installers: []
+# What to install. Every entry's `name` is unique across this file and is its key in versions.yaml.
+# source: pypi:<pkg> | npm:<pkg> | github:<owner>/<repo> | conda-forge:<pkg> | none
+cli_tools:
+  - { name: fish, source: "conda-forge:fish", winget: null, platforms: [linux, darwin] }
+  - { name: tmux, source: "conda-forge:tmux", platforms: [linux, darwin] }
+  - { name: fzf, source: "conda-forge:fzf", winget: junegunn.fzf }
+  - { name: fd-find, source: "conda-forge:fd-find", winget: sharkdp.fd }
+  - { name: bat, source: "conda-forge:bat", winget: sharkdp.bat }
+  - { name: ripgrep, source: "conda-forge:ripgrep", winget: BurntSushi.ripgrep.MSVC }
+  - { name: jq, source: "conda-forge:jq", winget: jqlang.jq }
+  - { name: gh, source: "conda-forge:gh", winget: GitHub.cli }
+  - { name: git-lfs, source: "conda-forge:git-lfs", winget: GitHub.GitLFS }
+pdftools:
+  - { name: poppler, source: "conda-forge:poppler", winget: null }
+uv_tools:
+  - { name: semble, source: "pypi:semble", spec: "semble[mcp]" }
+  - { name: graphifyy, source: "pypi:graphifyy", spec: "graphifyy[mcp]" }
+  - { name: paper-search-mcp, source: "pypi:paper-search-mcp", spec: "paper-search-mcp" }
+node: { major: 24 }
+mcp:
+  - name: mcp-semble
+    source: "pypi:semble"
+    command: uvx
+    args: ["--from", "semble[mcp]=={version}", "semble"]
+    clients: [claude, codex]
+  - name: mcp-codebase-memory-mcp
+    source: none   # version follows the codebase-memory-mcp installer
+    command: codebase-memory-mcp
+    args: []
+    clients: [claude, codex]
+    codex_env_vars: [CBM_CACHE_DIR, CBM_RUNTIME_DIR]
+  - name: mcp-drawio
+    source: "npm:@next-ai-drawio/mcp-server"
+    command: npx
+    args: ["-y", "@next-ai-drawio/mcp-server@{version}"]
+    clients: [claude, codex]
+  - name: mcp-graphify
+    source: none   # version follows the graphifyy uv tool
+    command: graphify-mcp
+    args: []
+    clients: [codex]
+  - name: mcp-paper-search
+    source: none   # version follows the paper-search-mcp uv tool
+    command: paper-search-mcp
+    args: []
+    clients: [codex]
+claude:
+  marketplaces:
+    - { name: claude-plugins-official, source: none, repo: anthropics/claude-plugins-official, builtin: true }
+    - { name: caveman, source: none, repo: JuliusBrussee/caveman }
+    - { name: adhd, source: none, repo: UditAkhourii/adhd }
+    - { name: academic-research-skills, source: none, repo: Imbad0202/academic-research-skills }
+    - { name: drawio, source: none, repo: jgraph/drawio-mcp }
+    - { name: openai-codex, source: none, repo: openai/codex-plugin-cc }
+  plugins:
+    - { name: "superpowers@claude-plugins-official", source: none, marketplace: claude-plugins-official }
+    - { name: "mattpocock-skills@claude-plugins-official", source: none, marketplace: claude-plugins-official }
+    - { name: "caveman@caveman", source: none, marketplace: caveman }
+    - { name: "adhd@adhd", source: none, marketplace: adhd }
+    - { name: "academic-research-skills@academic-research-skills", source: none, marketplace: academic-research-skills }
+    - { name: "drawio@drawio", source: none, marketplace: drawio }
+    - { name: "codex@openai-codex", source: none, marketplace: openai-codex }
+codex:
+  skill_bundles:
+    - { name: codex-bundle-superpowers, source: none, bundle: superpowers }
+    - { name: codex-bundle-academic-research-skills, source: none, bundle: academic-research-skills }
+    - { name: codex-bundle-drawio, source: none, bundle: drawio }
+installers:
+  - { name: claude, source: none, kind: native-installer }
+  - { name: codex, source: "github:openai/codex", kind: standalone-installer }
+  - { name: codebase-memory-mcp, source: "github:DeusData/codebase-memory-mcp", kind: install-script }
+  - { name: fnm, source: "github:Schniz/fnm" }
+  - { name: micromamba, source: "github:mamba-org/micromamba-releases" }
+  - { name: chezmoi, source: "github:twpayne/chezmoi" }
+  - { name: uv, source: "github:astral-sh/uv" }
+  - { name: bw, source: "npm:@bitwarden/cli" }
+  - { name: statusline, source: "github:yyds-tsai-dev/develop-env-settings", tag_prefix: "statusline-v" }

@@ -22,11 +22,11 @@ jobs:
         run: tests/setup-tools.sh
       - name: bats
         run: .tools/bin/bats tests/bats
+      - uses: astral-sh/setup-uv@v5
       - name: pytest
         run: |
           if [ -d tests/py ]; then
-            python3 -m pip install pytest pyyaml
-            python3 -m pytest tests/py
+            uv run --python 3.12 --with pytest --with pyyaml --with httpx pytest tests/py -v
           else
             echo "no tests/py yet"
           fi

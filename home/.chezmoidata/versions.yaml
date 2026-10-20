@@ -1,2 +1,24 @@
-versions: {}
-resolved_at: null
+resolved_at: '2026-10-20T07:28:35Z'
+versions:
+  bat: 0.26.1
+  bw: 2026.10.0
+  chezmoi: 2.73.2
+  codebase-memory-mcp: 0.12.1
+  codex: 0.163.0
+  fd-find: 10.5.0
+  fish: 4.9.3
+  fnm: 1.39.0
+  fzf: 0.74.5
+  gh: 2.102.0
+  git-lfs: 3.8.0
+  graphifyy: 0.9.92
+  jq: 1.8.2
+  mcp-drawio: 0.4.6
+  mcp-semble: 0.7.0
+  micromamba: 2.9.0-0
+  paper-search-mcp: 0.1.4
+  poppler: 26.09.0
+  ripgrep: 15.2.0
+  semble: 0.7.0
+  tmux: '3.8_'
+  uv: 0.13.3
