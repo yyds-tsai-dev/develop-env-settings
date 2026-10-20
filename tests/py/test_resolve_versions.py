@@ -100,3 +100,60 @@ def test_real_manifest_names_unique_and_node_major():
     assert len(names) == len(set(names))
     assert m["node"] == {"major": 24}
     assert all(e["source"] == "none" or ":" in e["source"] for e in rv.entries(m))
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self.data
+
+
+class _Client:
+    def __init__(self, data):
+        self.data, self.urls = data, []
+
+    def get(self, url, **kw):
+        self.urls.append(url)
+        return _Resp(self.data)
+
+
+def test_tag_prefix_rust_v_stripped():
+    c = _Client({"tag_name": "rust-v0.163.0"})
+    assert rv.fetch_latest("github:openai/codex|rust-v", client=c) == "0.163.0"
+    assert c.urls == ["https://api.github.com/repos/openai/codex/releases/latest"]
+    seen = []
+    m = {"installers": [{"name": "codex", "source": "github:openai/codex", "tag_prefix": "rust-v"}]}
+    rv.resolve(m, {}, lambda s: seen.append(s) or "0.163.0")
+    assert seen == ["github:openai/codex|rust-v"]
+
+
+def test_tag_without_declared_prefix_warns_and_keeps_old():
+    m = {"installers": [{"name": "codex", "source": "github:openai/codex", "tag_prefix": "rust-v"}]}
+    fetch = lambda s: rv.fetch_latest(s, client=_Client({"tag_name": "v1.0.0"}))  # noqa: E731
+    lock, warns = rv.resolve(m, {"codex": "0.1.0"}, fetch)
+    assert lock == {"codex": "0.1.0"} and len(warns) == 1 and "codex" in warns[0]
+
+
+def test_conda_invalid_version_string_rejected():
+    files = lambda *vs: {"files": [{"version": v, "attrs": {"subdir": d}} for v, d in vs]}  # noqa: E731
+    only_bad = files(("3.8_", "linux-64"))
+    assert rv.fetch_latest("conda-forge:tmux", client=_Client(only_bad)) is None
+    mixed = files(("3.8_", "linux-64"), ("3.5a", "linux-64"), ("3.4", "noarch"), ("9.9", "osx-arm64"))
+    assert rv.fetch_latest("conda-forge:tmux", client=_Client(mixed)) == "3.5a"
+
+
+def test_removed_manifest_entry_pruned():
+    lock, _ = rv.resolve(MANIFEST, {"gone": "1.0", "fzf": "0.1"}, lambda s: "1.2.3")
+    assert "gone" not in lock
+    lock, _ = rv.resolve(MANIFEST, {"gone": "1.0"}, lambda s: "1.2.3", only=["fnm"])
+    assert lock["gone"] == "1.0"
+
+
+def test_unknown_only_warns():
+    _, warns = rv.resolve(MANIFEST, {}, lambda s: "1", only=["nope"])
+    assert any("nope" in w for w in warns)

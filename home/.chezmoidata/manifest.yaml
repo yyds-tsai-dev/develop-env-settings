@@ -67,9 +67,10 @@ codex:
     - { name: codex-bundle-drawio, source: none, bundle: drawio }
 installers:
   - { name: claude, source: none, kind: native-installer }
-  - { name: codex, source: "github:openai/codex", kind: standalone-installer }
+  - { name: codex, source: "github:openai/codex", tag_prefix: "rust-v", kind: standalone-installer }
   - { name: codebase-memory-mcp, source: "github:DeusData/codebase-memory-mcp", kind: install-script }
   - { name: fnm, source: "github:Schniz/fnm" }
+  # micromamba tags carry a real build suffix (e.g. 2.9.0-0) and no v prefix; the lock keeps the suffix
   - { name: micromamba, source: "github:mamba-org/micromamba-releases" }
   - { name: chezmoi, source: "github:twpayne/chezmoi" }
   - { name: uv, source: "github:astral-sh/uv" }

@@ -27,6 +27,21 @@ def entries(manifest):
     return [e for g in groups for e in (g or [])]
 
 
+_CONDA_VERSION = re.compile(r"^\d+(\.\d+)*[a-z]?\d*$")
+
+
+def _conda_key(v):
+    m = re.match(r"^(\d+(?:\.\d+)*)([a-z]?)(\d*)$", v)
+    return (tuple(int(x) for x in m.group(1).split(".")), m.group(2), int(m.group(3) or 0))
+
+
+def _conda_pick(j):
+    vs = {f["version"] for f in j["files"]
+          if f.get("attrs", {}).get("subdir") in ("linux-64", "noarch")
+          and _CONDA_VERSION.match(f["version"])}
+    return max(vs, key=_conda_key) if vs else None
+
+
 def fetch_latest(source, client=None):
     """Latest version for `kind:ref`, or None on any network or parse failure."""
     try:
@@ -39,11 +54,20 @@ def fetch_latest(source, client=None):
         elif kind == "npm":
             url, pick = f"https://registry.npmjs.org/{ref}", lambda j: j["dist-tags"]["latest"]
         elif kind == "github":
+            ref, _, prefix = ref.partition("|")  # "owner/repo|<tag_prefix>"; undeclared: optional "v"
             url = f"https://api.github.com/repos/{ref}/releases/latest"
-            # strip a leading "v" or a prefix such as "rust-v" up to the first digit
-            pick = lambda j: re.sub(r"^\D*", "", j["tag_name"]) or j["tag_name"]  # noqa: E731
+
+            def pick(j):
+                tag = j["tag_name"]
+                if not prefix:
+                    return tag[1:] if tag.startswith("v") else tag
+                if not tag.startswith(prefix):
+                    raise ValueError(f"tag {tag} lacks prefix {prefix}")
+                return tag[len(prefix):]
         elif kind == "conda-forge":
-            url, pick = f"https://api.anaconda.org/package/conda-forge/{ref}", lambda j: j["latest_version"]
+            # latest_version can be a non-installable string; take the highest valid version
+            # that has a real linux-64 or noarch build
+            url, pick = f"https://api.anaconda.org/package/conda-forge/{ref}", _conda_pick
         else:
             return None
         headers = {}
@@ -60,10 +84,20 @@ def fetch_latest(source, client=None):
 def resolve(manifest, old_lock, fetch, only=None):
     lock = dict(old_lock)
     warnings = []
-    for e in entries(manifest):
+    ents = entries(manifest)
+    if only:
+        for n in only:
+            if n not in {e["name"] for e in ents}:
+                warnings.append(f"--only {n}: not in manifest")
+    else:
+        names = {e["name"] for e in ents}
+        lock = {k: v for k, v in lock.items() if k in names}
+    for e in ents:
         name, source = e["name"], e.get("source", "none")
         if source == "none" or (only and name not in only):
             continue
+        if source.startswith("github:") and e.get("tag_prefix"):
+            source = f"{source}|{e['tag_prefix']}"
         v = fetch(source)
         if v is None:
             warnings.append(
@@ -92,8 +126,10 @@ def main(argv=None, fetch=None):
     for w in warns:
         print(f"warning: {w}", file=sys.stderr)
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    lp.write_text(yaml.safe_dump(
+    tmp = lp.with_name(lp.name + ".tmp")
+    tmp.write_text(yaml.safe_dump(
         {"versions": dict(sorted(lock.items())), "resolved_at": stamp}, sort_keys=True))
+    os.replace(tmp, lp)
     return 0
 
 
