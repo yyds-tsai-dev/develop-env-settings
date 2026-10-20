@@ -9,10 +9,15 @@ Rewrites, from the current $HOME and PATH:
   - manifest claude.plugins / claude.marketplaces   from `claude plugin list` / `... marketplace list`
   - manifest uv_tools                      from `uv tool list`
   - manifest cli_tools / pdftools          from `micromamba env export --from-history`
+Reports (never rewrites, since mcp args are templated with {version}):
+  - manifest mcp membership for claude     against the user-scope MCP servers: the names and
+                                           commands of ~/.claude.json mcpServers (no other key is
+                                           read), else of `claude mcp list`
 Only manifest membership changes: entries are removed or appended as text lines, so comments,
 ordering and every untouched line stay byte-identical. A source that is unavailable is skipped
 (never treated as empty), so a missing tool cannot wipe a section.
 """
+import json
 import os
 import re
 import subprocess
@@ -23,6 +28,9 @@ ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / "home/.chezmoidata/manifest.yaml"
 EXT_LIST = ROOT / "desktop/vscode/server-extensions.txt"
 PLATFORM = {"linux": "linux", "darwin": "darwin"}.get(sys.platform, "windows")
+
+# HOME first: Path.home() reads USERPROFILE on Windows, which a sandboxed HOME does not change.
+HOME = Path(os.environ["HOME"]) if os.environ.get("HOME") else Path.home()
 
 ITEM = re.compile(r'^(\s*)- \{ name: ("?)([^",}]+)\2\s*[,}]')
 
@@ -73,6 +81,73 @@ def sync(lines, section, wanted, new_line, keep):
     return out, sorted(n for n, i in have.items() if i in drop), added
 
 
+def write_lf(path, text):
+    """Write text with LF line endings on every OS (text mode would write CRLF on Windows)."""
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+def manifest_mcp(lines):
+    """{registered name: command} of the manifest mcp entries whose clients include claude."""
+    out, name, cmd, top = {}, None, None, None
+    for line in lines:
+        m = re.match(r"^(\w+):", line)
+        if m:
+            top = m.group(1)
+        if top != "mcp":
+            continue
+        m = re.match(r"^  - name:\s*(\S+)", line)
+        if m:
+            name, cmd = re.sub(r"^mcp-", "", m.group(1)), None
+        m = re.match(r"^    command:\s*(\S+)", line)
+        if m:
+            cmd = m.group(1)
+        m = re.match(r"^    clients:\s*\[([^\]]*)\]", line)
+        if m and name and "claude" in [c.strip() for c in m.group(1).split(",")]:
+            out[name] = cmd
+    return out
+
+
+def registered_mcp():
+    """{name: command} of the user-scope Claude MCP servers, or None when unavailable.
+    Reads only the names and `command` values under mcpServers of ~/.claude.json."""
+    cfg = HOME / ".claude.json"
+    try:
+        servers = json.loads(cfg.read_text(encoding="utf-8")).get("mcpServers")
+        if isinstance(servers, dict):
+            return {n: (v.get("command") if isinstance(v, dict) else None) for n, v in servers.items()}
+    except (OSError, ValueError, AttributeError):
+        pass
+    out = run(["claude", "mcp", "list"])
+    if out is None:
+        return None
+    got = {}
+    for l in out.splitlines():
+        m = re.match(r"^([\w.-]+): (\S+)", l)
+        if m:
+            got[m.group(1)] = m.group(2)
+    return got
+
+
+def report_mcp(lines):
+    reg = registered_mcp()
+    if reg is None:
+        note("mcp: no ~/.claude.json mcpServers and claude mcp list unavailable: not compared")
+        return
+    want = manifest_mcp(lines)
+    extra = sorted(set(reg) - set(want))
+    missing = sorted(set(want) - set(reg))
+    differ = sorted(n for n in set(reg) & set(want) if reg[n] != want[n])
+    if not (extra or missing or differ):
+        note("mcp: matches the user-scope Claude MCP servers")
+        return
+    msg = "mcp: differs from the user-scope Claude MCP servers (not rewritten; edit the mcp entries by hand)"
+    msg += "".join(f"\n  + {n} (registered, command {reg[n]}; not in the manifest)" for n in extra)
+    msg += "".join(f"\n  - {n} (in the manifest, not registered)" for n in missing)
+    msg += "".join(f"\n  ~ {n}: manifest command {want[n]}, registered {reg[n]}" for n in differ)
+    note(msg)
+
+
 def report(section, removed, added):
     if removed or added:
         note(f"{section}: -{len(removed)} +{len(added)}"
@@ -101,16 +176,16 @@ def blocks(text):
 
 
 def main():
-    lines = MANIFEST.read_text().split("\n")
+    lines = MANIFEST.read_text(encoding="utf-8").split("\n")
     orig = list(lines)
 
     # VS Code server extensions
-    ext_dir = Path.home() / ".vscode-server/extensions"
+    ext_dir = HOME / ".vscode-server/extensions"
     if ext_dir.is_dir():
         ids = sorted({re.sub(r"-\d+\.\d+\.\d+.*$", "", d.name).lower()
                       for d in ext_dir.iterdir() if d.is_dir() and not d.name.startswith(".")})
         EXT_LIST.parent.mkdir(parents=True, exist_ok=True)
-        EXT_LIST.write_text("".join(i + "\n" for i in ids))
+        write_lf(EXT_LIST, "".join(i + "\n" for i in ids))
         note(f"server-extensions.txt: {len(ids)} extensions")
     else:
         note(f"{ext_dir} not found: extension list unchanged")
@@ -180,8 +255,11 @@ def main():
             keep=lambda l: not applies(l))
         report(section, rem, add)
 
+    # MCP servers: report only
+    report_mcp(lines)
+
     if lines != orig:
-        MANIFEST.write_text("\n".join(lines))
+        write_lf(MANIFEST, "\n".join(lines))
 
 
 if __name__ == "__main__":

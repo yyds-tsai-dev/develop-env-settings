@@ -14,6 +14,7 @@ setup() {
   cp "$REPO_ROOT/lib/capture_manifest.py" "$REPO/lib/"
   cp "$REPO_ROOT/home/.chezmoidata/"*.yaml "$REPO/home/.chezmoidata/"
   git -C "$REPO" init -q
+  git -C "$REPO" config core.autocrlf false   # Windows runners default to true
   git -C "$REPO" -c user.name=t -c user.email=t@example.com add -A
   git -C "$REPO" -c user.name=t -c user.email=t@example.com commit -qm base
   HEAD0="$(git -C "$REPO" rev-parse HEAD)"
@@ -62,7 +63,14 @@ if [ \"\$1 \$2\" = \"tool list\" ]; then printf 'semble v0.5.5\n- semble\nnewtoo
   [ -n "$(git -C "$REPO" status --porcelain)" ]
 }
 
+# Python on Windows cannot execute the sh stubs (claude, uv tool list, micromamba).
+need_sh_stubs() {
+  case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) skip "sh stubs cannot be run by Windows Python" ;; esac
+  return 0
+}
+
 @test "capture changes manifest membership only and keeps comments and the lock" {
+  need_sh_stubs
   run_capture
   [ "$status" -eq 0 ]
   m="$REPO/home/.chezmoidata/manifest.yaml"
@@ -75,6 +83,33 @@ if [ \"\$1 \$2\" = \"tool list\" ]; then printf 'semble v0.5.5\n- semble\nnewtoo
   grep -q 'builtin: true' "$m"              # builtin marketplace kept
   grep -q '3.12: the newest CPython' "$m"   # comments intact
   git -C "$REPO" diff --quiet -- home/.chezmoidata/versions.yaml
+}
+
+@test "capture writes LF line endings" {
+  run_capture
+  [ "$status" -eq 0 ]
+  ! grep -q $'\r' "$REPO/desktop/vscode/server-extensions.txt"
+  ! grep -q $'\r' "$REPO/home/.chezmoidata/manifest.yaml"
+}
+
+@test "capture reports the claude MCP servers against the manifest, reading only names and commands" {
+  need_sh_stubs
+  cat > "$SB_HOME/.claude.json" <<'EOF'
+{"oauthAccount": {"emailAddress": "secret-identity@example.invalid"},
+ "mcpServers": {
+   "semble": {"command": "uvx", "args": ["semble"], "env": {"TOKEN": "secret-token-value"}},
+   "drawio": {"command": "/abs/npx", "args": []},
+   "extra": {"command": "extra-mcp"}}}
+EOF
+  run_capture
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"+ extra (registered, command extra-mcp; not in the manifest)"* ]]
+  [[ "$output" == *"- codebase-memory-mcp (in the manifest, not registered)"* ]]
+  [[ "$output" == *"~ drawio: manifest command npx, registered /abs/npx"* ]]
+  [[ "$output" != *secret-* ]]
+  git -C "$REPO" diff -- home/.chezmoidata/manifest.yaml | grep -q 'name: newtool'   # other sections still captured
+  ! git -C "$REPO" diff -- home/.chezmoidata/manifest.yaml | grep -q 'extra-mcp'    # mcp never rewritten
 }
 
 @test "capture skips a section whose tool is missing instead of emptying it" {
