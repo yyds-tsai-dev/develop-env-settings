@@ -67,6 +67,7 @@ if command -v graphify >/dev/null 2>&1; then
     # manages; install into a scratch dir and keep only the skill.
     tmp="$(mktemp -d)"
     if CLAUDE_CONFIG_DIR="$tmp" graphify install >/dev/null && [ -f "$tmp/skills/graphify/SKILL.md" ]; then
+        rm -rf "$HOME/.claude/skills/graphify"
         mkdir -p "$HOME/.claude/skills/graphify"
         cp -R "$tmp/skills/graphify/." "$HOME/.claude/skills/graphify/"
     else

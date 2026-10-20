@@ -94,7 +94,7 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   grep -qx 'effort: medium' "$dest/.claude/agents/worker.md"
   grep -qx 'model: sonnet' "$dest/.claude/agents/fast-worker.md"
   # semble pin follows the Version lock
-  grep -qF "semble[mcp]==$(lock semble)" "$c"
+  grep -qF "uvx --python 3.12 --from \"semble[mcp]==$(lock semble)\"" "$c"
   grep -qF "semble[mcp]==$(lock semble)" "$dest/.claude/agents/semble-search.md"
 }
 
@@ -106,7 +106,7 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   sh -n "$f"
   grep -qF "semble[mcp]==$(lock mcp-semble)" "$f"
   grep -qF "@next-ai-drawio/mcp-server@$(lock mcp-drawio)" "$f"
-  grep -qE "^mcp_server 'semble' 'uvx' " "$f"
+  grep -qE "^mcp_server 'semble' 'uvx' '--python' '3.12' '--from' " "$f"
   grep -qE "^mcp_server 'drawio' 'npx' " "$f"
   grep -qE "^mcp_server 'codebase-memory-mcp' 'codebase-memory-mcp'$" "$f"
   ! grep -qE "^mcp_server '(graphify|paper-search)'" "$f"   # codex-only servers
@@ -162,7 +162,7 @@ run_script() {
   f="$(render_script)"
   fake_claude
   # semble already registered with the locked command; drawio with a stale one
-  printf '  Command: uvx\n  Args: --from semble[mcp]==%s semble\n' "$(lock mcp-semble)" > "$SB/mcp/semble"
+  printf '  Command: uvx\n  Args: --python 3.12 --from semble[mcp]==%s semble\n' "$(lock mcp-semble)" > "$SB/mcp/semble"
   printf '  Command: npx\n  Args: -y @next-ai-drawio/mcp-server@latest\n' > "$SB/mcp/drawio"
   run_script "$f"
   echo "$output"; cat "$SB/calls"
@@ -209,7 +209,7 @@ run_script() {
   json_ok "$SB_HOME/.claude/settings.json"   # settings still applied
 }
 
-@test "doctor claude checks: pass with everything present, login skips in --ci" {
+@test "doctor claude checks: pass with everything present and connected, login skips in --ci" {
   fake_claude
   for p in $(manifest_plugins); do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
   cat > "$STUB/claude" <<EOF
@@ -217,10 +217,11 @@ run_script() {
 case "\$1 \$2" in
   "--version "*) echo "9.9.9 (Claude Code)" ;;
   "plugin list") cat "$SB/plugins.json" ;;
-  "mcp list") printf 'semble: uvx - ok\ncodebase-memory-mcp: codebase-memory-mcp - ok\ndrawio: npx - ok\n' ;;
+  "mcp list") cat "$SB/mcplist" ;;
   "auth status") exit 1 ;;
 esac
 EOF
+  printf 'semble: uvx - \342\234\224 Connected\ncodebase-memory-mcp: codebase-memory-mcp  - \342\234\224 Connected\ndrawio: npx - \342\234\224 Connected\n' > "$SB/mcplist"
   for s in find-skills paper-search graphify codebase-memory; do
     mkdir -p "$SB_HOME/.claude/skills/$s"; : > "$SB_HOME/.claude/skills/$s/SKILL.md"
   done
@@ -238,9 +239,19 @@ EOF
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL claude_login"* ]]
   [[ "$output" == *"FAIL claude_plugins"* ]]
-  # in --ci a missing plugin is a SKIP (marketplace installs may need auth)
+  # a missing plugin FAILs in --ci too
   HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"SKIP claude_plugins"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL claude_plugins"* ]]
+  # a registered server that fails its health check FAILs
+  printf 'semble: uvx - \342\234\230 Failed to connect\ncodebase-memory-mcp: codebase-memory-mcp  - \342\234\224 Connected\ndrawio: npx - \342\234\224 Connected\n' > "$SB/mcplist"
+  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not connecting: semble"* ]]
+  # an unregistered one FAILs
+  grep -v '^drawio:' "$SB/mcplist" > "$SB/m2"; mv "$SB/m2" "$SB/mcplist"
+  HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"not registered: drawio"* ]]
 }
 
 # bats test_tags=docker
@@ -274,7 +285,10 @@ EOF
     grep -qE "Added stdio MCP|Removed MCP" /tmp/c2.log && echo MCP-READDED
     [ "$(sha256sum ~/.claude/settings.json)" = "$s1" ] && echo SETTINGS-STABLE
     echo "graphify-skill=$(cat ~/.claude/skills/graphify/.graphify_version 2>/dev/null)"
-    ls ~/.claude/agents/codebase-memory.md ~/.claude/hooks/cbm-session-reminder >/dev/null && echo CBM-FILES-OK
+    [ -s ~/.claude/agents/codebase-memory.md ] && echo CBM-AGENT-OK
+    for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
+      [ -x ~/.claude/hooks/$h ] && echo "CBM-HOOK-OK $h"
+    done
     claude mcp list
     ~/.local/share/chezmoi/bin/doctor --ci; echo "doctor-rc=$?"' 2>&1
   echo "$output"
@@ -285,7 +299,13 @@ EOF
   [[ "$output" == *SETTINGS-STABLE* ]]
   [[ "$output" != *MCP-READDED* ]]
   [[ "$output" == *"graphify-skill=$(lock graphifyy)"* ]]
-  [[ "$output" == *CBM-FILES-OK* ]]
+  [[ "$output" == *CBM-AGENT-OK* ]]
+  for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
+    [[ "$output" == *"CBM-HOOK-OK $h"* ]]
+  done
+  # semble and drawio really connect (doctor claude_mcp PASS already requires it)
+  printf '%s\n' "$output" | grep -q '^semble: .*Connected'
+  printf '%s\n' "$output" | grep -q '^drawio: .*Connected'
   for c in claude_installed claude_plugins claude_mcp claude_skills; do
     [[ "$output" == *"PASS $c"* ]]
   done

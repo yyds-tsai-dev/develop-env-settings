@@ -1,6 +1,5 @@
 # Claude Code checks (install, plugins, MCP servers, skills, login).
-# Protocol: see bin/doctor. --ci: login is SKIP, and so is a missing plugin
-# (marketplace installs may need auth there).
+# Protocol: see bin/doctor. --ci: login is SKIP.
 
 _claude_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
@@ -42,21 +41,26 @@ check_claude_plugins() {
     printf '%s\n' "$list" | grep -qF "\"id\": \"$p\"" || missing="$missing $p"
   done
   [ -z "$missing" ] && return 0
-  echo "plugin(s) not installed:$missing"
-  [ "${DOCTOR_CI:-0}" = 1 ] && return 2
-  return 1
+  echo "plugin(s) not installed:$missing"; return 1
 }
 register check_claude_plugins
 
+# Every manifest server must be registered and connect (`claude mcp list` runs
+# a health check: "✔ Connected" or "✘ Failed to connect ...").
 check_claude_mcp() {
-  local list n missing=
+  local list line n missing= failed=
   _claude_present || return 1
   list="$(claude mcp list 2>/dev/null)"
   for n in $(_claude_mcp_names); do
-    printf '%s\n' "$list" | grep -q "^$n:" || missing="$missing $n"
+    line="$(printf '%s\n' "$list" | grep "^$n:" | head -n1)"
+    if [ -z "$line" ]; then missing="$missing $n"
+    else case "$line" in *"✔"*) ;; *) failed="$failed $n(${line##* - })" ;; esac
+    fi
   done
-  [ -z "$missing" ] && return 0
-  echo "MCP server(s) not registered:$missing"; return 1
+  [ -z "$missing$failed" ] && return 0
+  [ -n "$missing" ] && echo "MCP server(s) not registered:$missing"
+  [ -n "$failed" ] && echo "MCP server(s) not connecting:$failed"
+  return 1
 }
 register check_claude_mcp
 

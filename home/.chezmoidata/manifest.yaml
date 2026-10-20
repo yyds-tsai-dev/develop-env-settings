@@ -21,7 +21,7 @@ mcp:
   - name: mcp-semble
     source: "pypi:semble"
     command: uvx
-    args: ["--from", "semble[mcp]=={version}", "semble"]
+    args: ["--python", "3.12", "--from", "semble[mcp]=={version}", "semble"]   # 3.12: the newest CPython lacks wheels and the Server has no C compiler
     clients: [claude, codex]
   - name: mcp-codebase-memory-mcp
     source: none   # version follows the codebase-memory-mcp installer
