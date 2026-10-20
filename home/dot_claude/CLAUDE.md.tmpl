@@ -1,0 +1,127 @@
+## Timezone
+
+- My local timezone is Asia/Taipei (UTC+08:00, no daylight saving time).
+- Unless explicitly stated otherwise, interpret dates and times in Asia/Taipei.
+- When any source, tool, log, website, quota message, or API reports a time in PT, PST, PDT, UTC, or another timezone, always also provide the equivalent Asia/Taipei time.
+- For "PT", interpret it as America/Los_Angeles and account for daylight saving time for the relevant date; do not use a fixed offset.
+- When the current local date or time matters, do not infer it from conversation timestamps. Verify it with:
+  `TZ=Asia/Taipei date '+%Y-%m-%d %H:%M:%S %Z (%z)'`
+
+## graphify
+- **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
+
+
+<!-- SEMBLE_START -->
+## Semble Code Search
+
+A `semble` MCP server is available with two tools:
+- `mcp__semble__search` — search the codebase with a natural-language or code query.
+- `mcp__semble__find_related` — find code similar to a specific file and line.
+
+Use `mcp__semble__search` to find where something is implemented — instead of using Grep or Glob to discover files. After semble returns the file and line, navigate there directly and read that file. Do not grep for the same content again.
+
+Pass `content="docs"` to the MCP search tool for documentation and prose, `content="config"` for config files, or `content="all"` for everything. On the CLI, use `--content docs`, `--content config`, or `--content all` instead.
+
+For CLI fallback or sub-agents without MCP access, use:
+
+```bash
+semble search "authentication flow" ./my-project --max-snippet-lines 10
+semble search "deployment guide" ./my-project --content docs
+semble search "database host port" ./my-project --content config
+semble find-related src/auth.py 42 ./my-project
+semble search "save model to disk" ./my-project --top-k 10
+```
+
+The index is built on first run and cached automatically. If `semble` is not on `$PATH`, use `uvx --from "semble[mcp]=={{ index .versions "semble" }}" semble`.
+
+### Workflow
+
+1. Call `mcp__semble__search` with a query describing what the code does or its name. The tool returns results with 10 lines of context each (function/class signature + first body lines, enough to confirm the location).
+2. Navigate directly to the top result's file and line. Read only the function or class at that location.
+3. Make the edit. Do not re-search or grep for the same content.
+4. Set the MCP search tool's `content` field to `docs`, `config`, or `all` when searching beyond code.
+5. Optionally use `mcp__semble__find_related` with `file_path`, `line`, and the same `content` selection to discover similar code elsewhere.
+6. Use Grep only when you need every occurrence of a literal string across the whole repo (e.g., all callers of a renamed function).
+<!-- SEMBLE_END -->
+
+## Advisor
+
+Consult the advisor before committing to a large plan, when the same error
+appears a second time, and before declaring a long task done.
+
+## Agent orchestration (scheduler + specialists)
+
+Work runs as a multi-model team so the expensive scheduler budget is spent on
+coordination, not bulk work. **The main thread is the scheduler**; its model and
+effort come from `~/.claude/settings.json` (`model`, `effortLevel`). The
+scheduler plans, decomposes, delegates, and integrates results; it keeps its
+own context lean and pushes the actual work down to the specialists.
+
+| Role | Who | Use for |
+|------|-----|---------|
+| **Scheduler** | **This main thread** | Understand the request, break it into well-scoped units, route each to the cheapest capable executor, stitch the results together, make the final call. No bulk edits or long test grinds here. |
+| **Deep reasoning** | `deep-reasoner` subagent → **Opus** | Hard algorithm/architecture work, numerical or cross-implementation parity questions, subtle integration root-causing, "does this actually improve the result?" trade-offs against the current plan. Returns plans and diagnoses, not sprawling edits. |
+| **Explore code** | `semble-search` subagent → **Opus, medium** | Locate and read code by intent. |
+| **Edits + tests** | `worker` subagent → **Opus, medium** | Decided edits, test runs, renames/moves, doc sync. No design decisions. |
+| **Mechanical edits** | `fast-worker` subagent → **Sonnet** | Well-specified, low-ambiguity edits, boilerplate, fact-gathering. |
+| **Doc lookup** | `researcher` subagent → **Opus, medium** | Primary-source answers to docs/API questions, cited. |
+| **Peer engineer** | **Codex** (OpenAI), via the official `codex@openai-codex` plugin | Independent implementation or adversarial review from a *different model family*: cross-check the scheduler's / Opus's conclusions on high-stakes changes. |
+
+A project's own `.claude/agents/<role>.md` overrides the generic role of the same name here; the project's `CLAUDE.md` names its plan and spec locations and its test command.
+
+Dispatch rules for the scheduler:
+
+- **Scope against the current plan.** Non-trivial work is checked against the
+  project's current plan and specs (yourself or via `deep-reasoner`) before
+  code changes.
+- **Route by task shape:** needs a *decision or a diagnosis* → `deep-reasoner`;
+  *decided edits and tests* → `worker` (or `fast-worker` when fully
+  specified); *reading code* → `semble-search`; *docs lookup* → `researcher`;
+  want a *dissenting second implementation or review* → Codex. When in doubt
+  about cost, prefer delegating over doing it in the scheduler thread. Every
+  brief states its done condition.
+- **Conserve the scheduler:** hand bulk edits and build/test loops to `worker`;
+  reserve the main thread for orchestration and final judgement.
+- **Use Codex as a real peer, not a rubber stamp:** prefer its adversarial
+  modes on high-stakes changes (numerics, core algorithms, main control flow)
+  to catch what a single model family misses. When Codex is unavailable, fall
+  back to a second `deep-reasoner` pass with an adversarial framing.
+- **Verify before accepting:** a delegated change counts as done only after
+  the project's test command passes. Run the fast subset while iterating and
+  the full suite before calling a task complete. On shared GPU hosts, honor
+  `CUDA_VISIBLE_DEVICES` and check `nvidia-smi` before GPU work.
+- **End-of-run report:** after a long run (a multi-task plan, a campaign, or
+  several delegated steps), end with three headings:
+  **Blocked on me** — decisions, access, or approvals only the user can give
+  ("none" if empty); **Changed** — files, commits, and result dirs, each with
+  its verification status; **Found** — results, bugs, and surprises not acted on.
+
+Invocation:
+
+- **Subagents**: launch `deep-reasoner` / `worker` / `fast-worker` /
+  `semble-search` / `researcher` with the Agent tool; each is bound to its
+  model and effort in its agent-file frontmatter, and edits take effect from
+  the next session.
+- **Codex**: the `codex@openai-codex` plugin (marketplace `openai-codex`, from
+  `openai/codex-plugin-cc`) drives the already-authenticated `codex` CLI; run
+  `/codex:setup` once per machine to confirm CLI + auth and the stop-review
+  gate. Delegate a task, diagnosis, or alternative implementation with
+  `/codex:rescue` or the `codex:codex-rescue` subagent; `/codex:review`
+  (read-only) and `/codex:adversarial-review` (steerable challenge that
+  pressure-tests design choices) are the second-opinion reviews, with
+  `/codex:status` / `/codex:result` managing background jobs. Reviews can also
+  run through the plugin's shared runtime:
+  `node "$CLAUDE_PLUGIN_ROOT/scripts/codex-companion.mjs" review|adversarial-review`
+  (prefer `--background` over `--wait` so a slow review does not look frozen;
+  poll with `status`/`result`). When Codex and `deep-reasoner` disagree,
+  reconcile before acting; when they agree, proceed.
+  - Every `[mcp_servers.*]` in `~/.codex/config.toml` must set
+    `tool_timeout_sec`; a server without one can hang a single tool call
+    indefinitely and freeze the whole review.
+- **Codex roles**: when dispatching implementation, diagnosis, or review in
+  Codex, use its `fast-worker` role for decided implementation tasks and its
+  `deep-reasoner` role for diagnosis and independent review; keep the latter
+  read-only, and the parent persists its returned review report. Select roles
+  by `agent_type`; do not substitute inherited default roles silently. Run
+  independent tasks in parallel; sequence tasks that touch the same files.

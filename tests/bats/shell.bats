@@ -178,7 +178,8 @@ apply_seeded() {
 }
 
 @test "doctor shell checks register" {
-  run "$REPO_ROOT/bin/doctor" --ci
+  # only the shell checks: the claude checks would query the real home's claude
+  DOCTOR_ONLY='20-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"fish_present"* ]]
   [[ "$output" == *"tmux_version"* ]]
   [[ "$output" == *"git_user_email"* ]]

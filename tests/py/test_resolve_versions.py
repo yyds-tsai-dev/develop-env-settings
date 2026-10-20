@@ -102,6 +102,15 @@ def test_real_manifest_names_unique_and_node_major():
     assert all(e["source"] == "none" or ":" in e["source"] for e in rv.entries(m))
 
 
+def test_claude_skills_are_lock_entries():
+    m = yaml.safe_load((Path(__file__).resolve().parents[2] / "home/.chezmoidata/manifest.yaml").read_text())
+    names = {e["name"] for e in rv.entries(m)}
+    assert {"skill-find-skills", "skill-paper-search"} <= names
+    lock, _ = rv.resolve(m, {}, lambda s: "1.2.3" if s == "github:vercel-labs/skills" else None,
+                         only=["skill-find-skills"])
+    assert lock == {"skill-find-skills": "1.2.3"}
+
+
 class _Resp:
     def __init__(self, data):
         self.data = data

@@ -20,5 +20,6 @@ versions:
   poppler: 26.09.0
   ripgrep: 15.2.0
   semble: 0.7.0
+  skill-find-skills: 1.7.4
   tmux: '3.8_'
   uv: 0.13.3

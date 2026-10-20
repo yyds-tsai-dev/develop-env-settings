@@ -1,0 +1,124 @@
+{{- /*
+claude-settings.json: ~/.claude/settings.json. Rendered by dot_claude/settings.json.tmpl
+and re-applied by run_onchange_after_50-claude.sh (the codebase-memory-mcp installer and
+`claude plugin marketplace add` rewrite the file). enabledPlugins and
+extraKnownMarketplaces come from the Manifest; builtin marketplaces are not declared.
+The cbm hooks call the wrapper scripts that installer writes to ~/.claude/hooks.
+*/ -}}
+{
+  "model": "opus",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$HOME/.claude/hooks/cbm-subagent-reminder\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "\"$HOME/.claude/statusline-bin\"",
+    "refreshInterval": 60
+  },
+  "enabledPlugins": {
+{{- range $i, $p := .claude.plugins }}{{ if $i }},{{ end }}
+    {{ $p.name | quote }}: true
+{{- end }}
+  },
+  "extraKnownMarketplaces": {
+{{- $first := true }}
+{{- range .claude.marketplaces }}{{ if not (index . "builtin") }}{{ if not $first }},{{ end }}{{ $first = false }}
+    {{ .name | quote }}: {
+      "source": {
+        "source": "github",
+        "repo": {{ .repo | quote }}
+      }
+    }
+{{- end }}{{ end }}
+  },
+  "effortLevel": "high",
+  "modelSettings": {
+    "claude-fable-5-1": {
+      "effortLevel": "high"
+    },
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+  },
+  "advisorModel": "fable",
+  "theme": "auto",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}

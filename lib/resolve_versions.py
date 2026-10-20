@@ -21,7 +21,7 @@ def entries(manifest):
     codex = manifest.get("codex") or {}
     groups = [
         manifest.get("cli_tools"), manifest.get("pdftools"), manifest.get("uv_tools"),
-        manifest.get("mcp"), claude.get("marketplaces"), claude.get("plugins"),
+        manifest.get("mcp"), claude.get("marketplaces"), claude.get("plugins"), claude.get("skills"),
         codex.get("skill_bundles"), manifest.get("installers"),
     ]
     return [e for g in groups for e in (g or [])]

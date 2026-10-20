@@ -60,6 +60,15 @@ claude:
     - { name: "academic-research-skills@academic-research-skills", source: none, marketplace: academic-research-skills }
     - { name: "drawio@drawio", source: none, marketplace: drawio }
     - { name: "codex@openai-codex", source: none, marketplace: openai-codex }
+  # Third-party Claude skills, reinstalled from upstream into ~/.claude/skills/<dir>/ (own skills
+  # with no upstream are vendored under home/dot_claude/skills/; there are none today).
+  # url: fetched as SKILL.md; {ref} is v<version> (lock key `version_from`, default `name`), or main.
+  # installer: written by that tool's own installer, nothing fetched here.
+  skills:
+    - { name: skill-find-skills, source: "github:vercel-labs/skills", dir: find-skills, url: "https://raw.githubusercontent.com/vercel-labs/skills/{ref}/skills/find-skills/SKILL.md" }
+    - { name: skill-paper-search, source: none, dir: paper-search, version_from: paper-search-mcp, url: "https://raw.githubusercontent.com/openags/paper-search-mcp/{ref}/claude-code/SKILL.md" }
+    - { name: skill-graphify, source: none, dir: graphify, installer: graphify }   # `graphify install` (graphifyy uv tool)
+    - { name: skill-codebase-memory, source: none, dir: codebase-memory, installer: codebase-memory-mcp }
 codex:
   skill_bundles:
     - { name: codex-bundle-superpowers, source: none, bundle: superpowers }

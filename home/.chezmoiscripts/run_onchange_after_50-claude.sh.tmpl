@@ -1,0 +1,133 @@
+{{- if and (or .isServer .isDesktop) (ne .chezmoi.os "windows") -}}
+{{- $cbm := index .versions "codebase-memory-mcp" | default "" -}}
+#!/bin/sh
+# Claude Code: native install when missing, codebase-memory-mcp via its upstream
+# installer (which writes its hooks, agents and skill), third-party skills,
+# marketplaces and plugins from the Manifest, user-scope MCP servers at locked
+# versions, then re-applies ~/.claude/settings.json because the cbm installer
+# and `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks
+# the login). Warns and exits 0 on any failure; never aborts apply.
+# Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+cd "$HOME" || exit 0
+
+warn() { echo "warning: $*" >&2; }
+
+# --- Claude Code (native installer, latest; it updates itself) ---
+if ! claude --version >/dev/null 2>&1; then
+    curl -fsSL https://claude.ai/install.sh | bash || warn "Claude Code native install failed"
+fi
+CLAUDE_OK=
+if claude --version >/dev/null 2>&1; then CLAUDE_OK=1; else warn "claude missing; skipping plugins and MCP servers"; fi
+
+# --- codebase-memory-mcp (upstream installer pinned to the lock) ---
+# The installer rewrites settings.json hooks and registers the MCP server with an
+# absolute path; both are put back below. --clients=claude: Codex is configured
+# by its own managed config.
+CBM_VERSION="{{ $cbm }}"
+if [ "$(codebase-memory-mcp --version 2>/dev/null)" != "codebase-memory-mcp $CBM_VERSION" ] \
+   && { [ -n "$CBM_VERSION" ] || ! command -v codebase-memory-mcp >/dev/null 2>&1; }; then
+    if [ -n "$CBM_VERSION" ]; then
+        ref="v$CBM_VERSION"; dl="https://github.com/DeusData/codebase-memory-mcp/releases/download/v$CBM_VERSION"
+    else
+        ref=main; dl="https://github.com/DeusData/codebase-memory-mcp/releases/latest/download"
+    fi
+    tmp="$(mktemp -d)"
+    if curl -fsSL --retry 3 -o "$tmp/install.sh" "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/$ref/install.sh"; then
+        CBM_DOWNLOAD_URL="$dl" bash "$tmp/install.sh" --dir="$HOME/.local/bin" --clients=claude \
+            || warn "codebase-memory-mcp $CBM_VERSION install failed"
+    else
+        warn "could not download the codebase-memory-mcp $ref installer"
+    fi
+    rm -rf "$tmp"
+fi
+
+# --- third-party skills ---
+# fetch_skill DIR URL: install URL as ~/.claude/skills/DIR/SKILL.md
+fetch_skill() {
+    dst="$HOME/.claude/skills/$1/SKILL.md"
+    tmp="$(mktemp)"
+    if curl -fsSL --retry 3 -o "$tmp" "$2"; then
+        mkdir -p "$HOME/.claude/skills/$1"
+        cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst"
+    else
+        warn "could not download skill $1 from $2"
+    fi
+    rm -f "$tmp"
+}
+{{- range .claude.skills }}
+{{- if index . "url" }}
+{{- $v := index $.versions (index . "version_from" | default .name) }}
+{{- $ref := "main" }}{{ if $v }}{{ $ref = printf "v%s" $v }}{{ end }}
+fetch_skill {{ .dir | squote }} {{ replace "{ref}" $ref .url | squote }}
+{{- else if eq (index . "installer" | default "") "graphify" }}
+if command -v graphify >/dev/null 2>&1; then
+    # CLAUDE_CONFIG_DIR: graphify also writes its block into CLAUDE.md, which chezmoi
+    # manages; install into a scratch dir and keep only the skill.
+    tmp="$(mktemp -d)"
+    if CLAUDE_CONFIG_DIR="$tmp" graphify install >/dev/null && [ -f "$tmp/skills/graphify/SKILL.md" ]; then
+        mkdir -p "$HOME/.claude/skills/graphify"
+        cp -R "$tmp/skills/graphify/." "$HOME/.claude/skills/graphify/"
+    else
+        warn "graphify install failed"
+    fi
+    rm -rf "$tmp"
+else
+    warn "graphify missing; skipping the graphify skill"
+fi
+{{- end }}
+{{- end }}
+
+if [ -n "$CLAUDE_OK" ]; then
+    # --- marketplaces and plugins ---
+    mkts="$(claude plugin marketplace list --json 2>/dev/null)"
+    has_mkt() { printf '%s\n' "$mkts" | grep -qF "\"name\": \"$1\""; }
+{{- range .claude.marketplaces }}
+    has_mkt {{ .name | squote }} || claude plugin marketplace add {{ .repo | squote }} \
+        || warn "could not add marketplace {{ .name }}"
+{{- end }}
+    plugins="$(claude plugin list --json 2>/dev/null)"
+    has_plugin() { printf '%s\n' "$plugins" | grep -qF "\"id\": \"$1\""; }
+{{- range .claude.plugins }}
+    has_plugin {{ .name | squote }} || claude plugin install {{ .name | squote }} \
+        || warn "could not install plugin {{ .name }}"
+{{- end }}
+
+fi
+
+# --- MCP servers (user scope) ---
+# mcp_server NAME COMMAND [ARG]...: register unless `claude mcp get` already
+# shows the same command and args; a different registration is replaced.
+mcp_server() {
+    name="$1"; shift
+    got="$(claude mcp get "$name" 2>/dev/null)" || got=
+    cmd="$(printf '%s\n' "$got" | sed -n 's/^ *Command: //p')"
+    args="$(printf '%s\n' "$got" | sed -n 's/^ *Args: *//p')"
+    [ -n "$cmd" ] && [ "$cmd${args:+ $args}" = "$*" ] && return 0
+    [ -n "$got" ] && claude mcp remove -s user "$name" >/dev/null 2>&1
+    claude mcp add -s user "$name" -- "$@" >/dev/null || warn "could not add MCP server $name"
+}
+if [ -n "$CLAUDE_OK" ]; then
+{{- range .mcp }}
+{{- if has "claude" .clients }}
+{{- $v := index $.versions .name }}
+mcp_server {{ trimPrefix "mcp-" .name | squote }} {{ .command | squote }}
+{{- range .args }} {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }}
+{{- end }}
+{{- end }}
+fi
+
+# --- settings.json: the exact file chezmoi manages ---
+settings="$HOME/.claude/settings.json"
+want="$(mktemp)"
+cat > "$want" <<'DEVENV_CLAUDE_SETTINGS'
+{{ template "claude-settings.json" . -}}
+DEVENV_CLAUDE_SETTINGS
+if ! cmp -s "$want" "$settings"; then
+    mkdir -p "$HOME/.claude"
+    cat "$want" > "$settings"
+fi
+rm -f "$want"
+exit 0
+{{- end }}
