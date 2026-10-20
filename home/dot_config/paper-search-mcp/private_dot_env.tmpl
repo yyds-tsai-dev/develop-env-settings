@@ -1,0 +1,11 @@
+{{- /* Secret file: renders empty (so chezmoi creates nothing) unless both fields resolve. The second lookup is skipped when the first is empty so a locked vault warns once. */ -}}
+{{- $target := ".config/paper-search-mcp/.env" -}}
+{{- $ieee := includeTemplate "bw-field" (dict "item" "paper-search" "field" "ieee_api_key" "target" $target) | trim -}}
+{{- $mail := "" -}}
+{{- if $ieee -}}
+{{-   $mail = includeTemplate "bw-field" (dict "item" "paper-search" "field" "unpaywall_email" "target" $target) | trim -}}
+{{- end -}}
+{{- if and $ieee $mail -}}
+PAPER_SEARCH_MCP_IEEE_API_KEY={{ $ieee }}
+PAPER_SEARCH_MCP_UNPAYWALL_EMAIL={{ $mail }}
+{{ end -}}

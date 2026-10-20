@@ -1,0 +1,47 @@
+{{- /*
+bw-field: returns one Secret field from the Bitwarden folder develop-env-settings.
+Input: dict with item (item name), field (custom field name, or notes /
+username / password) and target (file shown in the warning).
+Never prompts and never hangs: bw is only called when it is on PATH and
+`bw status` reports "unlocked"; otherwise (or when the item or field is
+missing) it warns and returns an empty string, so the caller renders an empty
+file and chezmoi creates nothing.
+*/ -}}
+{{- $value := "" -}}
+{{- $ready := false -}}
+{{- if lookPath "bw" -}}
+{{-   $st := output "bw" "status" | fromJson -}}
+{{-   if eq (index $st "status") "unlocked" -}}
+{{-     $ready = true -}}
+{{-   end -}}
+{{- end -}}
+{{- if $ready -}}
+{{-   $folderId := "" -}}
+{{-   range (output "bw" "list" "folders" "--search" "develop-env-settings" | fromJson) -}}
+{{-     if eq .name "develop-env-settings" -}}{{- $folderId = .id -}}{{- end -}}
+{{-   end -}}
+{{-   if $folderId -}}
+{{-     range (output "bw" "list" "items" "--folderid" $folderId "--search" .item | fromJson) -}}
+{{-       if eq .name $.item -}}
+{{-         if eq $.field "notes" -}}
+{{-           $value = .notes | default "" -}}
+{{-         else if eq $.field "username" -}}
+{{-           $value = (.login | default dict).username | default "" -}}
+{{-         else if eq $.field "password" -}}
+{{-           $value = (.login | default dict).password | default "" -}}
+{{-         else -}}
+{{-           range (.fields | default list) -}}
+{{-             if eq .name $.field -}}{{- $value = .value | default "" -}}{{- end -}}
+{{-           end -}}
+{{-         end -}}
+{{-       end -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+{{- if not $ready -}}
+{{-   warnf "Bitwarden locked or missing: skipping %s" .target -}}
+{{- end -}}
+{{- if and $ready (not $value) -}}
+{{-   warnf "Bitwarden item %s field %s not found: skipping %s" .item .field .target -}}
+{{- end -}}
+{{- $value -}}
