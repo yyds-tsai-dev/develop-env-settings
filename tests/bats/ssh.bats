@@ -112,3 +112,39 @@ render_server() {
   chezmoi_iso apply --exclude scripts --destination "$SB_DEST"
   [ ! -e "$SB_DEST/.ssh/authorized_keys" ]
 }
+
+# ak_stubs DIR: a PATH dir with only sh, cat, mktemp and rm (no uv, no python3).
+ak_stubs() {
+  mkdir -p "$1"
+  for t in sh cat mktemp rm; do ln -sf "$(command -v "$t")" "$1/$t"; done
+}
+
+@test "authorized_keys: a failing uv falls back to python3 -I" {
+  case "$(uname -s)" in Linux) ;; *) skip "server render needs linux" ;; esac
+  [ -x /usr/bin/python3 ] || skip "no /usr/bin/python3"
+  init_role server >&2
+  ak_stubs "$STUB"
+  ln -sf /usr/bin/python3 "$STUB/python3"
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/uv"; chmod +x "$STUB/uv"
+  mkdir -p "$SB_DEST/.ssh"; chmod 700 "$SB_DEST/.ssh"
+  printf 'ssh-rsa AAAAB3other keep-me\n' > "$SB_DEST/.ssh/authorized_keys"
+  PATH="$STUB" run chezmoi_iso apply --exclude scripts --destination "$SB_DEST" "$SB_DEST/.ssh/authorized_keys"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(head -n1 "$SB_DEST/.ssh/authorized_keys")" = "ssh-rsa AAAAB3other keep-me" ]
+  grep -qF "$(cut -d' ' -f2 "$REPO_ROOT/ssh/authorized_keys.pub-list" | head -n1)" "$SB_DEST/.ssh/authorized_keys"
+}
+
+@test "authorized_keys: neither uv nor python3 leaves the file unchanged with a warning" {
+  case "$(uname -s)" in Linux) ;; *) skip "server render needs linux" ;; esac
+  init_role server >&2
+  ak_stubs "$STUB"
+  mkdir -p "$SB_DEST/.ssh"; chmod 700 "$SB_DEST/.ssh"
+  printf 'ssh-rsa AAAAB3other keep-me\n' > "$SB_DEST/.ssh/authorized_keys"
+  cp "$SB_DEST/.ssh/authorized_keys" "$SB/before"
+  PATH="$STUB" run chezmoi_iso apply --exclude scripts --destination "$SB_DEST" "$SB_DEST/.ssh/authorized_keys"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning:"*"left unchanged"* ]]
+  cmp "$SB/before" "$SB_DEST/.ssh/authorized_keys"
+}

@@ -127,7 +127,7 @@ if ! shopt -oq posix; then
 fi
 
 # >>> develop-env tools >>>
-export MAMBA_ROOT_PREFIX="{{ .chezmoi.homeDir }}/micromamba"
+export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 if command -v micromamba >/dev/null 2>&1; then
     eval "$(micromamba shell hook --shell bash --root-prefix "$MAMBA_ROOT_PREFIX" 2>/dev/null)"
 fi

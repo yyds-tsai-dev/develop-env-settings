@@ -1,5 +1,5 @@
 # Managed PATH order: ~/.local/bin first, once.
-set -gx MAMBA_ROOT_PREFIX "{{ .chezmoi.homeDir }}/micromamba"
+set -gx MAMBA_ROOT_PREFIX "$HOME/micromamba"
 
 function __de_path_first
     while set -l i (contains -i -- $HOME/.local/bin $PATH)

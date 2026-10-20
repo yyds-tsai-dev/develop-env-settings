@@ -12,7 +12,12 @@ if ($?prompt) then
     tty -s
     if ($status == 0) then
         which fish >& /dev/null
-        if ($status == 0) exec fish
+        if ($status == 0) then
+            # A login shell reads ~/.login after this file; exec fish would skip
+            # it, so source it first (EDA tool setup often lives there).
+            if ($?loginsh && -r ~/.login) source ~/.login
+            exec fish
+        endif
     endif
 endif
 # <<< develop-env <<<

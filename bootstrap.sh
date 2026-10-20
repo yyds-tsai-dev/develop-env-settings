@@ -15,7 +15,8 @@
 #   chezmoi asks once). --ci: CI=true (non-interactive; enables CI test hooks) and
 #   `bin/doctor --ci`.
 # curl, git and tar are required: when one is missing, the script prints the
-# apt command and exits 1 (nothing can work without them).
+# apt command (macOS: `xcode-select --install`, also when git is only the Xcode
+# stub) and exits 1 (nothing can work without them).
 # An existing clone is reused; with --source, a different origin URL is a warning.
 # POSIX sh (the one-liner pipes it to sh). Never uses sudo: missing system
 # packages are printed as commands. The body is one function so that `curl | sh`
@@ -50,12 +51,27 @@ bootstrap_main() {
     # Prompts must not read the rest of a piped script: use the terminal or nothing.
     if [ -z "$ci" ] && (: </dev/tty) 2>/dev/null; then tty=/dev/tty; else tty=/dev/null; fi
 
-    for t in curl git tar; do
-        command -v "$t" >/dev/null 2>&1 || {
-            echo "error: $t is required; ask an admin, or run: sudo apt install $t" >&2
+    # macOS: /usr/bin/git is a stub until the Command Line Tools are installed,
+    # so `git --version` is the test there.
+    if [ "$(uname -s)" = Darwin ]; then
+        git --version >/dev/null 2>&1 || {
+            echo "error: git is required; install the Command Line Tools: xcode-select --install" >&2
             return 1
         }
-    done
+        for t in curl tar; do
+            command -v "$t" >/dev/null 2>&1 || {
+                echo "error: $t is required; install the Command Line Tools: xcode-select --install" >&2
+                return 1
+            }
+        done
+    else
+        for t in curl git tar; do
+            command -v "$t" >/dev/null 2>&1 || {
+                echo "error: $t is required; ask an admin, or run: sudo apt install $t" >&2
+                return 1
+            }
+        done
+    fi
 
     case "$(uname -s)-$(uname -m)" in
         Linux-x86_64)  cz=linux-amd64;  uvt=x86_64-unknown-linux-gnu ;;
