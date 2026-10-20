@@ -6,10 +6,10 @@ set -u
 [ "$#" -eq 1 ] || { echo "usage: $0 <title>" >&2; exit 2; }
 tap="$(mktemp)"
 {
-  [ -r doctor.out ] && sed -n 's/\r$//; s/^FAIL /not ok doctor FAIL /p' doctor.out
+  [ -r doctor.out ] && tr -d '\r' < doctor.out | sed -n 's/^FAIL /not ok doctor FAIL /p'
   if [ -r bootstrap.out ]; then
     echo "not ok bootstrap output (last 15 lines)"
-    tail -n 15 bootstrap.out | sed 's/\r$//; s/^/# /'
+    tail -n 15 bootstrap.out | tr -d '\r' | sed 's/^/# /'
   fi
 } > "$tap"
 "$(dirname "$0")/ci-annotate.sh" "$tap" "$1"

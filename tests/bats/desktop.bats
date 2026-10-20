@@ -531,3 +531,21 @@ EOF
   echo "$output"
   [[ "$output" == *"WARN statusline_installed:"*"bin/update"* ]]
 }
+
+@test "macOS ~/.zshrc renders through the real ignore and sources cleanly" {
+  [ "$HOST_OS" = Darwin ] || skip "~/.zshrc is managed on macOS only"
+  init_desktop
+  stub_bw locked
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  f="$SB_DEST/.zshrc"
+  [ -f "$f" ]
+  grep -q '^# >>> develop-env >>>' "$f"
+  command -v zsh >/dev/null 2>&1 || skip "zsh not installed"
+  zsh -n "$f"
+  # non-interactive: no error and no exec fish
+  HOME="$SB_HOME" run zsh -c 'source "$1"; echo sourced-ok' _ "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *sourced-ok* ]]
+}

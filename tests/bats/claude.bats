@@ -88,10 +88,15 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
 }
 
 @test "plain desktop gets no Claude Code: install script empty, ~/.claude ignored" {
-  init_role server >&2
-  sed -e 's/^\( *role = \).*/\1"desktop"/' -e 's/^\( *isServer = \).*/\1false/' \
-      -e 's/^\( *isDesktop = \).*/\1true/' "$SB_CONFIG" > "$SB/cfg.new"
-  cat "$SB/cfg.new" > "$SB_CONFIG"
+  if [ "$(uname -s)" = Linux ]; then
+    # the desktop role is refused on Linux: write a server config, rewrite its data
+    init_role server >&2
+    sed -e 's/^\( *role = \).*/\1"desktop"/' -e 's/^\( *isServer = \).*/\1false/' \
+        -e 's/^\( *isDesktop = \).*/\1true/' "$SB_CONFIG" > "$SB/cfg.new"
+    cat "$SB/cfg.new" > "$SB_CONFIG"
+  else
+    init_role desktop >&2
+  fi
   for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl; do
     sed 's/\.chezmoi\.os/"darwin"/g' "$REPO_ROOT/home/.chezmoiscripts/$s" | chezmoi_iso execute-template > "$SB/out"
     [ -z "$(tr -d '[:space:]' < "$SB/out")" ] || { echo "$s renders on a plain desktop"; false; }
