@@ -1,4 +1,6 @@
-{{- if and .isServer (ne .chezmoi.os "windows") -}}
+{{- /* Every role off Windows (Linux Server, macOS Desktop and Desktop + Server);
+Windows runs the PowerShell twin, run_onchange_after_55-codex.ps1. */ -}}
+{{- if ne .chezmoi.os "windows" -}}
 {{- $codex := index .versions "codex" | default "" -}}
 #!/bin/sh
 # Codex: the standalone build at the locked version, the codebase-memory-mcp
@@ -8,6 +10,14 @@
 # relative symlinks) and the find-skills / paper-search skills Claude also gets.
 # config.toml is merged by modify_private_config.toml; nothing logs in (Doctor
 # checks the login). Warns and exits 0 on any failure; never aborts apply.
+{{- if not .isServer }}
+# A plain Desktop has only some MCP runtimes: config.toml keeps the servers
+# whose command exists (merge_codex_config.py --desktop), and this script merges
+# it again at the end, since the modify script ran before the after-scripts
+# installed npx (20-node) and codebase-memory-mcp (50-claude). uvx and npx
+# servers are started once first (cached for their first start); a missing
+# codebase-memory-mcp skips its skill with a warning, not a failure.
+{{- end }}
 # Any warning (a download, an install, a prerequisite not there yet) leaves a
 # retry marker holding a fresh nonce, so the next apply (bin/update) reruns this
 # script after every failed run; a clean run removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
@@ -22,6 +32,10 @@ cd "$HOME" || exit 0
 {{ template "retry-sh" "55-codex" }}
 FAILED=
 warn() { echo "warning: $*" >&2; FAILED=1; }
+{{- if not .isServer }}
+# skipped: a desktop lacks this runtime; not a failure.
+skipped() { echo "warning: $*" >&2; }
+{{- end }}
 # done_or_retry: record the outcome for the next apply, then exit 0.
 done_or_retry() {
     if [ -n "$FAILED" ]; then
@@ -67,7 +81,11 @@ for f in skills/codebase-memory/SKILL.md agents/codebase-memory.toml \
 done
 [ "$(cat "$stamp" 2>/dev/null)" = "$cbm_have" ] || need=1
 if [ -z "$cbm_have" ]; then
+{{- if .isServer }}
     warn "codebase-memory-mcp missing; skipping its Codex skill and agents"
+{{- else }}
+    skipped "codebase-memory-mcp not installed on this desktop; skipping its Codex skill and agents"
+{{- end }}
 elif [ -n "$need" ]; then
     tmp="$(mktemp -d)"
     mkdir -p "$tmp/.codex"
@@ -177,5 +195,40 @@ bundle {{ .name | squote }} {{ $dir | squote }} {{ .repo | squote }} {{ replace 
 # Expected skills for Doctor (65-codex): "bundle <name> <dir>" and "skill <dir>" lines.
 cat "$state" > "$B/.devenv-skills" || warn "cannot write $B/.devenv-skills"
 rm -f "$state"
+{{- if not .isServer }}
+
+# --- MCP servers: start uvx/npx ones once, then merge config.toml again ---
+# prewarm help|stdin COMMAND [ARG]...: as in 50-claude (shared uv and npx caches).
+prewarm() {
+    mode="$1"; shift
+    [ "$mode" = help ] && set -- "$@" --help
+    if command -v timeout >/dev/null 2>&1; then timeout 900 "$@" </dev/null >/dev/null 2>&1
+    else "$@" </dev/null >/dev/null 2>&1; fi \
+        || warn "could not pre-fetch the MCP server command: $*"
+}
+{{- range .mcp }}
+{{- if and (has "codex" .clients) (has (index . "command" | default "") (list "uvx" "npx")) }}
+{{- $v := index $.versions .name }}
+{{- $cl := .command | squote }}
+{{- range (index . "args" | default list) }}{{ $cl = printf "%s %s" $cl (ternary (replace "{version}" ($v | toString) .) (. | replace "=={version}" "" | replace "@{version}" "@latest") (not (empty $v)) | squote) }}{{ end }}
+command -v {{ .command | squote }} >/dev/null 2>&1 && prewarm {{ ternary "help" "stdin" (eq .command "uvx") }} {{ $cl }}
+{{- end }}
+{{- end }}
+cfg="$HOME/.codex/config.toml"
+frag="$(mktemp)"; out="$(mktemp)"
+cat > "$frag" <<'DEVENV_CODEX_MANAGED'
+{{ template "codex-managed.toml" . }}
+DEVENV_CODEX_MANAGED
+if ! command -v uv >/dev/null 2>&1; then
+    warn "uv missing; ~/.codex/config.toml not merged again"
+elif uv run --quiet --script {{ .chezmoi.workingTree | squote }}/lib/merge_codex_config.py --desktop --keep-on-error "$frag" --current-file "$cfg" > "$out"; then
+    if [ -s "$out" ] && ! cmp -s "$out" "$cfg"; then
+        (umask 077; cat "$out" > "$cfg") || warn "cannot write $cfg"
+    fi
+else
+    warn "merging the managed Codex config failed; ~/.codex/config.toml left unchanged"
+fi
+rm -f "$frag" "$out"
+{{- end }}
 done_or_retry
 {{- end }}

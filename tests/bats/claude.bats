@@ -119,23 +119,21 @@ sys_path() {
 
 blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
 
-@test "plain desktop gets Claude Code but no Codex: scripts render per OS, ~/.claude managed" {
+@test "plain desktop gets Claude Code and Codex: scripts render per OS, ~/.claude and ~/.codex managed" {
   init_plain_desktop
-  # macOS: the sh scripts; Windows: the ps1 twins; Codex nowhere
-  for s in "$SCRIPT" run_onchange_after_60-statusline.sh.tmpl; do
+  # macOS: the sh scripts; Windows: the ps1 twins
+  for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl; do
     out="$(render_os darwin "$s")"; ! blank "$out" || { echo "$s empty on a macOS desktop"; false; }
     out="$(render_os windows "$s")"; blank "$out" || { echo "$s renders on windows"; false; }
   done
-  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_55-codex.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
     out="$(render_os windows "$s")"; ! blank "$out" || { echo "$s empty on a windows desktop"; false; }
     out="$(render_os darwin "$s")"; blank "$out" || { echo "$s renders on macOS"; false; }
   done
-  for o in darwin windows; do
-    out="$(render_os "$o" run_onchange_after_55-codex.sh.tmpl)"; blank "$out" || { echo "codex renders on a $o desktop"; false; }
-  done
   run chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiignore"
-  for p in .codex .config/paper-search-mcp; do printf '%s\n' "$output" | grep -qx "$p"; done
+  printf '%s\n' "$output" | grep -qx .config/paper-search-mcp   # its MCP server is Server-only
   ! printf '%s\n' "$output" | grep -qx '.claude'
+  ! printf '%s\n' "$output" | grep -qx '.codex'
 }
 
 @test "windows install script: native installer, cbm for Claude only, MCP servers guarded by runtime" {

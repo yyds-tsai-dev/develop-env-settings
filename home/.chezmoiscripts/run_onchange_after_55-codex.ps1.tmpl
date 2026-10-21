@@ -1,0 +1,308 @@
+{{- /* Windows (the Desktop role; Server use goes through WSL2). PowerShell twin
+of run_onchange_after_55-codex.sh. */ -}}
+{{- if eq .chezmoi.os "windows" -}}
+{{- $codex := index .versions "codex" | default "" -}}
+# Codex: the official standalone installer (install.ps1 at the locked tag; user
+# scope, no admin; it installs under %LOCALAPPDATA%\Programs\OpenAI\Codex\bin
+# and puts that dir on the user PATH), the codebase-memory-mcp skill and agents
+# (its `install --clients=codex --skip-binary` run with a scratch home, so it
+# never writes the managed config.toml, AGENTS.md or the user PATH), the skill
+# bundles from the Manifest (repo tarball at a pinned ref, each skill a
+# directory junction in ~/.codex/skills: junctions need no admin, unlike
+# symlinks) and the find-skills / paper-search skills Claude also gets. uvx and
+# npx MCP servers are started once (cached for their first start), then
+# config.toml is merged again (merge_codex_config.py --desktop), since the
+# modify step ran before the after-scripts installed codebase-memory-mcp.
+# Nothing logs in (Doctor checks the login). Never aborts apply. A runtime this
+# desktop lacks is skipped with one warning (no retry marker); any other
+# warning leaves a retry marker with a fresh nonce, so the next apply (re-run the
+# bootstrap one-liner) reruns this after every failed run; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "55-codex") }}
+# Locks: codex={{ $codex }} codebase-memory-mcp={{ index .versions "codebase-memory-mcp" | default "" }}
+{{- range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+{{ template "retry-ps1" "55-codex" }}
+$script:failed = $false
+function Warn-Step([string]$Message) { Write-Warning $Message; $script:failed = $true }
+# Skip-Step: this desktop lacks the runtime; not a failure.
+function Skip-Step([string]$Message) { Write-Warning $Message }
+function Test-Cmd([string]$Name) { [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+function New-TempDir {
+    $d = Join-Path ([IO.Path]::GetTempPath()) ('devenv-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $d | Out-Null
+    return $d
+}
+
+$bin = Join-Path $HOME '.local\bin'
+$codexBin = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'
+$env:Path = $bin + [IO.Path]::PathSeparator + $codexBin + [IO.Path]::PathSeparator + $env:Path
+Set-Location $HOME
+
+# --- Codex standalone build (upstream install.ps1 at the locked tag) ---
+$codexVersion = '{{ $codex }}'
+$have = ''
+if (Test-Cmd 'codex') {
+    $v = "$(& codex --version 2>$null)".Trim()
+    if ($v -match ' ([0-9][0-9A-Za-z.+-]*)$') { $have = $Matches[1] }
+}
+if (-not $have -or ($codexVersion -and $have -ne $codexVersion)) {
+    if ($codexVersion) { $ref = "rust-v$codexVersion" } else { $ref = 'main' }
+    $inst = Join-Path ([IO.Path]::GetTempPath()) ('devenv-codex-' + [guid]::NewGuid() + '.ps1')
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri "https://raw.githubusercontent.com/openai/codex/$ref/scripts/install/install.ps1" -OutFile $inst
+        $env:CODEX_NON_INTERACTIVE = '1'
+        if ($codexVersion) { $env:CODEX_RELEASE = $codexVersion } else { $env:CODEX_RELEASE = 'latest' }
+        & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $inst
+        if ($LASTEXITCODE -ne 0) { Warn-Step "Codex $codexVersion install failed" }
+    } catch {
+        Warn-Step "could not download the Codex $ref installer: $_"
+    }
+    Remove-Item Env:CODEX_NON_INTERACTIVE, Env:CODEX_RELEASE -ErrorAction SilentlyContinue
+    Remove-Item -Force -ErrorAction SilentlyContinue $inst
+}
+
+$SK = Join-Path $HOME '.codex\skills'
+$B = Join-Path $HOME '.codex\skill-bundles'
+$agents = Join-Path $HOME '.codex\agents'
+try {
+    foreach ($d in $SK, $B, $agents) { New-Item -ItemType Directory -Force -Path $d -ErrorAction Stop | Out-Null }
+} catch {
+    Warn-Step 'cannot create ~/.codex dirs'
+    Set-RetryMarker
+    exit 0
+}
+$state = New-Object Collections.Generic.List[string]
+
+# --- codebase-memory-mcp skill and agents for Codex ---
+# Its MCP server and hooks are in the managed config.toml with a bare command.
+# The installer stops running cbm sessions, so it runs only when the installed
+# cbm version differs from the one the copies came from.
+$cbmHave = ''
+if (Test-Cmd 'codebase-memory-mcp') { $cbmHave = ("$(& codebase-memory-mcp --version 2>$null)".Trim() -replace '^codebase-memory-mcp ', '') }
+$stamp = Join-Path $SK 'codebase-memory\.devenv-cbm-version'
+$need = $false
+foreach ($f in 'skills\codebase-memory\SKILL.md', 'agents\codebase-memory.toml', 'agents\codebase-memory-scout.toml', 'agents\codebase-memory-auditor.toml') {
+    if (-not (Test-Path (Join-Path $HOME ".codex\$f"))) { $need = $true }
+}
+if (-not (Test-Path $stamp) -or "$(Get-Content -Raw $stamp -ErrorAction SilentlyContinue)".Trim() -ne $cbmHave) { $need = $true }
+if (-not $cbmHave) {
+    Skip-Step 'codebase-memory-mcp not installed on this desktop; skipping its Codex skill and agents'
+} elseif ($need) {
+    $tmp = New-TempDir
+    New-Item -ItemType Directory -Force -Path (Join-Path $tmp '.codex') | Out-Null
+    $saved = @{}
+    foreach ($n in 'HOME', 'USERPROFILE', 'CODEX_HOME', 'CLAUDE_CONFIG_DIR', 'XDG_CONFIG_HOME', 'APPDATA', 'LOCALAPPDATA') { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
+    try {
+        $env:HOME = $tmp; $env:USERPROFILE = $tmp
+        $env:APPDATA = Join-Path $tmp 'AppData\Roaming'; $env:LOCALAPPDATA = Join-Path $tmp 'AppData\Local'
+        Remove-Item Env:CODEX_HOME, Env:CLAUDE_CONFIG_DIR, Env:XDG_CONFIG_HOME -ErrorAction SilentlyContinue
+        # --skip-binary: no binary copy, so the user PATH is never touched
+        $log = & codebase-memory-mcp install -y --skip-binary --clients=codex 2>&1
+        $rc = $LASTEXITCODE
+    } finally {
+        foreach ($n in $saved.Keys) { [Environment]::SetEnvironmentVariable($n, $saved[$n]) }
+    }
+    $src = Join-Path $tmp '.codex\skills\codebase-memory'
+    if ($rc -eq 0 -and (Test-Path (Join-Path $src 'SKILL.md'))) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $SK 'codebase-memory') | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $src '*') (Join-Path $SK 'codebase-memory')
+        foreach ($a in Get-ChildItem -Path (Join-Path $tmp '.codex\agents') -Filter 'codebase-memory*.toml' -ErrorAction SilentlyContinue) {
+            Copy-Item -Force $a.FullName $agents
+        }
+        [IO.File]::WriteAllText($stamp, "$cbmHave`n")
+    } else {
+        Warn-Step "codebase-memory-mcp install --clients=codex failed: $(($log | Select-Object -Last 3) -join ' ')"
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
+}
+if (Test-Path (Join-Path $SK 'codebase-memory\SKILL.md')) { $state.Add('skill codebase-memory') }
+
+# --- junction helpers ---
+function Test-Junction([string]$Path) {
+    $i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    return ($i -and ($i.Attributes -band [IO.FileAttributes]::ReparsePoint))
+}
+# Remove-Junction PATH: delete the link only, never what it points to.
+function Remove-Junction([string]$Path) { [IO.Directory]::Delete($Path, $false) }
+
+# --- skills fetched as one SKILL.md (same url and lock as Claude's) ---
+function Get-Skill([string]$Dir, [string]$Url) {
+    $d = Join-Path $SK $Dir
+    $dst = Join-Path $d 'SKILL.md'
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('devenv-skill-' + [guid]::NewGuid())
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $Url -OutFile $tmp
+        if (Test-Junction $d) { Remove-Junction $d }
+        New-Item -ItemType Directory -Force -Path $d | Out-Null
+        if (-not (Test-Path $dst) -or (Get-FileHash $tmp).Hash -ne (Get-FileHash $dst).Hash) { Copy-Item -Force $tmp $dst }
+    } catch {
+        Warn-Step "could not download skill $Dir from ${Url}: $_"
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+    if (Test-Path $dst) { $state.Add("skill $Dir") }
+}
+{{- range .claude.skills }}
+{{- if and (index . "url") (index . "codex") }}
+{{- $v := index $.versions (index . "version_from" | default .name) }}
+{{- $ref := "main" }}{{ if $v }}{{ $ref = printf "v%s" $v }}{{ end }}
+Get-Skill {{ .dir | squote }} {{ replace "{ref}" $ref .url | squote }}
+{{- end }}
+{{- end }}
+
+# --- skill bundles ---
+# Get-Bundle DIR REPO REF: unpack the REPO tarball at REF into $B\DIR once.
+function Get-Bundle([string]$Dir, [string]$Repo, [string]$Ref) {
+    $final = Join-Path $B $Dir
+    if (Test-Path $final) { return $true }
+    $tmp = Join-Path $B ('.tmp.' + [guid]::NewGuid())
+    $tgz = "$tmp.tgz"
+    try {
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri "https://codeload.github.com/$Repo/tar.gz/$Ref" -OutFile $tgz
+        & tar -xzf $tgz -C $tmp --strip-components=1
+        if ($LASTEXITCODE -ne 0) { throw "tar exit $LASTEXITCODE" }
+        Move-Item $tmp $final
+        Remove-Item -Force -ErrorAction SilentlyContinue $tgz
+        return $true
+    } catch {
+        Warn-Step "could not fetch $Repo at ${Ref}: $_"
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp, $tgz
+        return $false
+    }
+}
+# Set-SkillLink DIR PATH: ~/.codex/skills/<leaf PATH> is a junction to
+# ~/.codex/skill-bundles/DIR/PATH. An old junction is replaced; a plain
+# directory is moved to $B\.replaced\.
+function Set-SkillLink([string]$Dir, [string]$Path) {
+    $name = Split-Path -Leaf $Path
+    $target = Join-Path (Join-Path $B $Dir) ($Path -replace '/', '\')
+    $dst = Join-Path $SK $name
+    if (-not (Test-Path (Join-Path $target 'SKILL.md'))) { Warn-Step "bundle $Dir has no skill at $Path"; return $false }
+    try {
+        if (Test-Junction $dst) {
+            $cur = @((Get-Item -LiteralPath $dst -Force).Target)[0]
+            if ($cur -ne $target) { Remove-Junction $dst }
+        } elseif (Test-Path $dst) {
+            $rep = Join-Path $B '.replaced'
+            New-Item -ItemType Directory -Force -Path $rep | Out-Null
+            Move-Item $dst (Join-Path $rep "$name.$(Get-Date -Format yyyyMMddHHmmss)")
+        }
+        if (-not (Test-Path $dst)) { New-Item -ItemType Junction -Path $dst -Target $target -ErrorAction Stop | Out-Null }
+    } catch {
+        Warn-Step "cannot link skill ${name}: $_"
+        return $false
+    }
+    $state.Add("skill $name")
+    return $true
+}
+# Install-Bundle NAME DIR REPO REF SKILLS_DIR SKILLS_JSON [PATH]...: fetch and link
+# one bundle (see the sh twin).
+function Install-Bundle([string]$Name, [string]$Dir, [string]$Repo, [string]$Ref, [string]$SkillsDir, [string]$SkillsJson, [string[]]$Paths) {
+    if (-not (Get-Bundle $Dir $Repo $Ref)) { return }
+    $ok = $true
+    $root = Join-Path $B $Dir
+    if ($SkillsDir) {
+        $n = 0
+        foreach ($c in Get-ChildItem -Directory -Path (Join-Path $root ($SkillsDir -replace '/', '\')) -ErrorAction SilentlyContinue) {
+            if (-not (Test-Path (Join-Path $c.FullName 'SKILL.md'))) { continue }
+            $n++
+            if (-not (Set-SkillLink $Dir "$SkillsDir/$($c.Name)")) { $ok = $false }
+        }
+        if ($n -eq 0) { Warn-Step "bundle ${Name}: no skills under $SkillsDir"; $ok = $false }
+    }
+    if ($SkillsJson) {
+        $list = @()
+        try { $list = @((Get-Content -Raw (Join-Path $root ($SkillsJson -replace '/', '\')) | ConvertFrom-Json).skills) } catch { }
+        if ($list.Count -eq 0) { Warn-Step "bundle ${Name}: no skills listed in $SkillsJson"; $ok = $false }
+        foreach ($p in $list) { if (-not (Set-SkillLink $Dir ($p -replace '^\./', ''))) { $ok = $false } }
+    }
+    foreach ($p in $Paths) { if ($p -and -not (Set-SkillLink $Dir $p)) { $ok = $false } }
+    if ($ok) { $state.Add("bundle $Name $Dir") }
+}
+{{- range .codex.skill_bundles }}
+{{- $v := index . "version" | default (index $.versions .name) | default "" }}
+{{- if and (contains "{version}" .ref) (not (index $.versions .name)) }}
+{{- /* no retry marker: bin/update locks a version, which changes this script */}}
+Write-Warning {{ printf "%s: no locked version; skipped (re-run the bootstrap one-liner)" .name | squote }}
+{{- else }}
+{{- $dir := printf "%s-%s" .bundle ($v | default (trunc 12 .ref)) }}
+Install-Bundle {{ .name | squote }} {{ $dir | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ index . "skills_dir" | default "" | squote }} {{ index . "skills_json" | default "" | squote }} @({{ range $i, $p := (index . "skills" | default list) }}{{ if $i }}, {{ end }}{{ $p | squote }}{{ end }})
+{{- end }}
+{{- end }}
+
+# Expected skills for Doctor (65-codex): "bundle <name> <dir>" and "skill <dir>" lines.
+try { [IO.File]::WriteAllText((Join-Path $B '.devenv-skills'), (($state -join "`n") + "`n")) } catch { Warn-Step "cannot write $B\.devenv-skills" }
+
+# --- MCP servers: start uvx/npx ones once, then merge config.toml again ---
+# Get-McpCommandLine / Invoke-Prewarm: as in 50-claude.ps1 (shared caches).
+function Get-McpCommandLine([string[]]$CommandLine) {
+    $src = (Get-Command $CommandLine[0] -ErrorAction SilentlyContinue).Source
+    if ($src -match '\.(cmd|bat|ps1)$') { return @('cmd', '/c') + $CommandLine }
+    return $CommandLine
+}
+function Invoke-Prewarm([string]$Mode, [string[]]$CommandLine) {
+    $argList = @($CommandLine | Select-Object -Skip 1)
+    if ($Mode -eq 'help') { $argList += '--help' }
+    try {
+        $psi = New-Object Diagnostics.ProcessStartInfo
+        $psi.FileName = (Get-Command $CommandLine[0] -ErrorAction Stop).Source
+        $psi.Arguments = $argList -join ' '
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $p = [Diagnostics.Process]::Start($psi)
+        $p.BeginOutputReadLine(); $p.BeginErrorReadLine()
+        try { $p.StandardInput.Close() } catch { }
+        if (-not $p.WaitForExit(900000)) { $p.Kill(); throw 'timed out after 15 minutes' }
+        $p.WaitForExit()
+        if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+    } catch {
+        Warn-Step "could not pre-fetch the MCP server command $($CommandLine -join ' '): $_"
+    }
+}
+{{- range .mcp }}
+{{- if and (has "codex" .clients) (has (index . "command" | default "") (list "uvx" "npx")) }}
+{{- $v := index $.versions .name }}
+if (Test-Cmd {{ .command | squote }}) {
+    Invoke-Prewarm {{ ternary "help" "stdin" (eq .command "uvx") }} (Get-McpCommandLine @({{ .command | squote }}
+{{- range (index . "args" | default list) }}, {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }}))
+}
+{{- end }}
+{{- end }}
+$cfg = Join-Path $HOME '.codex\config.toml'
+$fragB64 = '{{ includeTemplate "codex-managed.toml" . | b64enc }}'
+$uv = Get-Command uv -ErrorAction SilentlyContinue
+if (-not $uv) {
+    Warn-Step 'uv missing; ~/.codex/config.toml not merged again'
+} else {
+    try {
+        $psi = New-Object Diagnostics.ProcessStartInfo
+        $psi.FileName = $uv.Source
+        $psi.Arguments = "run --quiet --script `"{{ joinPath .chezmoi.workingTree "lib" "merge_codex_config.py" }}`" --desktop --keep-on-error --fragment-b64 $fragB64 --current-file `"$cfg`""
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardOutput = $true
+        $p = [Diagnostics.Process]::Start($psi)
+        $ms = New-Object IO.MemoryStream
+        $p.StandardOutput.BaseStream.CopyTo($ms)
+        $p.WaitForExit()
+        $new = $ms.ToArray()
+        if ($p.ExitCode -ne 0 -or $new.Length -eq 0) { throw "uv exit $($p.ExitCode)" }
+        $old = $null
+        if (Test-Path $cfg) { $old = [IO.File]::ReadAllBytes($cfg) }
+        if (-not $old -or [Convert]::ToBase64String($old) -ne [Convert]::ToBase64String($new)) { [IO.File]::WriteAllBytes($cfg, $new) }
+    } catch {
+        Warn-Step "merging the managed Codex config failed; ~/.codex/config.toml left unchanged: $_"
+    }
+}
+
+if ($script:failed) {
+    Set-RetryMarker
+    Write-Warning '55-codex had failures; re-running the bootstrap one-liner retries it'
+} else {
+    Clear-RetryMarker
+}
+exit 0
+{{- end }}

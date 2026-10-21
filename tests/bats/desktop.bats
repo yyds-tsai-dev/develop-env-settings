@@ -203,12 +203,13 @@ EOF
   fi
 }
 
-@test "desktop role on darwin ignores server-only files and manages Claude Code" {
+@test "desktop role on darwin ignores server-only files and manages Claude Code and Codex" {
+  command -v uv >/dev/null 2>&1 || skip "uv needed for the Codex config merge"
   init_desktop
   stub_bw locked
   apply_with "$STUB"
   [ "$status" -eq 0 ]
-  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .config/paper-search-mcp .ssh/authorized_keys; do
+  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .config/paper-search-mcp .ssh/authorized_keys; do
     [ ! -e "$SB_DEST/$p" ] || { echo "server-only $p rendered on a desktop" >&2; false; }
   done
   [ -f "$SB_DEST/.wezterm.lua" ]
@@ -218,6 +219,12 @@ EOF
   done
   grep -q '"statusLine"' "$SB_DEST/.claude/settings.json"
   ! grep -q graphify "$SB_DEST/.claude/CLAUDE.md"   # no graphify skill on a plain Desktop
+  # Codex too: AGENTS.md, generic agents, the vendored skill and the merged config
+  for p in .codex/AGENTS.md .codex/agents/deep-reasoner.toml .codex/agents/fast-worker.toml .codex/skills/codex-queue-workflow/SKILL.md .codex/config.toml; do
+    [ -s "$SB_DEST/$p" ] || { echo "$p missing on a desktop" >&2; false; }
+  done
+  grep -qx '\[mcp_servers.openaiDeveloperDocs\]' "$SB_DEST/.codex/config.toml"
+  grep -qx 'model = "gpt-6-astra"' "$SB_DEST/.codex/config.toml"
 }
 
 @test "server role does not manage wezterm or ~/.ssh/config" {
@@ -318,7 +325,7 @@ EOF
 
 @test "bootstrap.ps1 and the PowerShell doctor files parse" {
   command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
-  for f in bootstrap.ps1 bin/doctor.ps1 doctor.d/*.ps1; do
+  for f in bootstrap.ps1 bin/doctor.ps1 doctor.d/*.ps1 lib/*.ps1; do
     run ps_parse "$REPO_ROOT/$f"
     echo "$f: $output"
     [ "$status" -eq 0 ]
@@ -344,7 +351,9 @@ EOF
 
 @test "doctor: server-only checks SKIP on a desktop role, run on a server role" {
   printf '[user]\n\temail = t@example.invalid\n' > "$SB_HOME/.gitconfig"   # git_user_email is role-independent
-  for c in 10 20 65; do
+  # never the host's claude or codex
+  for t in claude codex; do printf '#!/bin/sh\nexit 1\n' > "$STUB/$t"; chmod +x "$STUB/$t"; done
+  for c in 10 20; do
     DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY="$c-*" run "$REPO_ROOT/bin/doctor" --ci
     echo "$output"
     [ "$status" -eq 0 ]
@@ -352,9 +361,9 @@ EOF
   done
   DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='20-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"SKIP fish_present: server role only (role: desktop)"* ]]
-  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"SKIP codex_installed: server role only"* ]]
-  printf '#!/bin/sh\nexit 1\n' > "$STUB/claude"; chmod +x "$STUB/claude"   # never the host's claude
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"codex_installed"* ]]   # Codex checks run on every role too
+  [[ "$output" != *"server role only"* ]]
   DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"claude_mcp"* ]]   # Claude Code checks run on every role
   [[ "$output" != *"server role only"* ]]
@@ -578,6 +587,42 @@ PSEOF
   [ "$(grep -n '^cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user drawio' "$SB/calls" | cut -d: -f1)" ]
   [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
   [ -s "$SB_HOME/.claude/settings.json" ]
+}
+
+@test "doctor.ps1 Codex checks on a desktop expect only the servers and skills present there" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub codex is a sh script"
+  m="$REPO_ROOT/home/.chezmoidata/manifest.yaml"
+  c="$SB_HOME/.codex"; mkdir -p "$c/skills" "$c/skill-bundles"
+  printf '[mcp_servers.semble]\ncommand = "uvx"\ntool_timeout_sec = 120\n\n[mcp_servers.openaiDeveloperDocs]\nurl = "https://developers.openai.com/mcp"\ntool_timeout_sec = 60\n' > "$c/config.toml"
+  st="$c/skill-bundles/.devenv-skills"; : > "$st"
+  for b in $(sed -n 's/^    - { name: \(codex-bundle-[^,]*\),.*/\1/p' "$m"); do echo "bundle $b $b-1" >> "$st"; done
+  for d in codex-queue-workflow find-skills paper-search; do
+    mkdir -p "$c/skills/$d"; : > "$c/skills/$d/SKILL.md"
+    [ "$d" = codex-queue-workflow ] || echo "skill $d" >> "$st"
+  done
+  printf '#!/bin/sh\ncase "$1 $2" in\n  "--version "*) echo codex-cli 9 ;;\n  "login status") exit 1 ;;\nesac\nexit 0\n' > "$STUB/codex"
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/uvx"
+  chmod +x "$STUB/codex" "$STUB/uvx"
+  cat > "$SB/run.ps1" <<'PSEOF'
+$env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+foreach ($c in 'npx', 'codebase-memory-mcp', 'graphify-mcp', 'paper-search-mcp') { if (Get-Command $c -ErrorAction SilentlyContinue) { "SKIPTEST $c on PATH"; exit 0 } }
+& (Join-Path $PSHOME 'pwsh') -NoProfile -File $env:T_SCRIPT -Ci
+exit $LASTEXITCODE
+PSEOF
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$REPO_ROOT/bin/doctor.ps1" DEVENV_ROLE=desktop DOCTOR_ONLY='65-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  for k in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $k"* ]]; done
+  [[ "$output" == *"SKIP codex_login"* ]]
+  # with npx present, drawio is expected too
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/npx"; chmod +x "$STUB/npx"
+  sed -i.bak '/SKIPTEST/d' "$SB/run.ps1"
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$REPO_ROOT/bin/doctor.ps1" DEVENV_ROLE=desktop DOCTOR_ONLY='65-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL codex_mcp: MCP server(s) missing from config.toml: drawio"* ]]
 }
 
 @test "mac scripts carry a Homebrew marker so installing Homebrew reruns them" {

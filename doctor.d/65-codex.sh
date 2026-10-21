@@ -1,6 +1,8 @@
 # Codex checks (install, MCP servers in config.toml, skills, login).
-# Protocol: see bin/doctor. --ci: login is SKIP. Server role only (Codex is
-# installed by 55-codex on Servers), so every check SKIPs on a plain Desktop.
+# Protocol: see bin/doctor. --ci: login is SKIP. Every role: on a plain Desktop
+# only the url MCP servers and those whose command exists are expected in
+# config.toml, and the codebase-memory skill only when codebase-memory-mcp is
+# installed (55-codex and merge_codex_config.py --desktop skip the others).
 
 _codex_manifest() { echo "$DOCTOR_ROOT/home/.chezmoidata/manifest.yaml"; }
 
@@ -9,12 +11,25 @@ _codex_present() {
   echo "codex not on PATH: $DOCTOR_FIX"; return 1
 }
 
+# _codex_desktop: true on a plain Desktop (no server role).
+_codex_desktop() {
+  case "$DOCTOR_ROLE" in server|desktop+server) return 1 ;; esac
+  return 0
+}
+
 # _codex_mcp_names: config names (lock key minus "mcp-") of the manifest MCP
-# servers whose clients include codex.
+# servers whose clients include codex; on a plain Desktop a command server only
+# when its command is on PATH (a url server always).
 _codex_mcp_names() {
+  local n c
   awk '/^[a-z_]+:/ { s = ($1 == "mcp:") }
-       s && /^  - name:/ { n = $3; sub(/^mcp-/, "", n) }
-       s && /^    clients:/ && /codex/ { print n }' "$(_codex_manifest)"
+       s && /^  - name:/ { n = $3; sub(/^mcp-/, "", n); c = "-" }
+       s && /^    command:/ { c = $2 }
+       s && /^    clients:/ && /codex/ { print n, c }' "$(_codex_manifest)" |
+  while read -r n c; do
+    if [ "$c" != - ] && _codex_desktop && ! command -v "$c" >/dev/null 2>&1; then continue; fi
+    echo "$n"
+  done
 }
 
 # _codex_bundles: names of the manifest's codex.skill_bundles.
@@ -41,7 +56,6 @@ _codex_skill_dirs() {
 }
 
 check_codex_installed() {
-  doctor_server_only || return
   _codex_present || return 1
   codex --version >/dev/null 2>&1 && return 0
   echo "codex --version failed"; return 1
@@ -51,7 +65,6 @@ register check_codex_installed
 # Every manifest server is a [mcp_servers.<name>] table in ~/.codex/config.toml
 # and sets tool_timeout_sec.
 check_codex_mcp() {
-  doctor_server_only || return
   local cfg="$HOME/.codex/config.toml" n missing= notimeout= have
   [ -f "$cfg" ] || { echo "$cfg missing: $DOCTOR_FIX"; return 1; }
   have="$(awk '/^\[mcp_servers\.[^.]+\]$/ { n = $0; sub(/^\[mcp_servers\./, "", n); sub(/\]$/, "", n); print n " table"; next }
@@ -72,12 +85,13 @@ register check_codex_mcp
 # Every manifest bundle installed (recorded by the install script), every
 # recorded skill resolves to a SKILL.md, links are relative.
 check_codex_skills() {
-  doctor_server_only || return
   local sk="$HOME/.codex/skills" st="$HOME/.codex/skill-bundles/.devenv-skills"
   local b d kind name missing= broken= abs=
   [ -f "$st" ] || { echo "$st missing: $DOCTOR_FIX"; return 1; }
   for b in $(_codex_bundles); do grep -q "^bundle $b " "$st" || missing="$missing $b"; done
-  for d in codex-queue-workflow codebase-memory $(_codex_skill_dirs); do
+  local cbm=codebase-memory
+  if _codex_desktop && ! command -v codebase-memory-mcp >/dev/null 2>&1; then cbm=; fi
+  for d in codex-queue-workflow $cbm $(_codex_skill_dirs); do
     grep -qx "skill $d" "$st" || [ "$d" = codex-queue-workflow ] || missing="$missing $d"
   done
   [ -f "$sk/codex-queue-workflow/SKILL.md" ] || missing="$missing codex-queue-workflow"
@@ -101,7 +115,6 @@ register check_codex_skills
 # file has none) differs from the version of Claude's installed plugin for the
 # same upstream: the two clients have drifted apart.
 check_codex_bundle_versions() {
-  doctor_server_only || return
   local st="$HOME/.codex/skill-bundles/.devenv-skills" reg="$HOME/.claude/plugins/installed_plugins.json"
   local name plugin pj dir cv clv drift=
   [ -f "$st" ] || { echo "no $st yet"; return 2; }
@@ -125,7 +138,6 @@ DEVENV_BUNDLES
 register check_codex_bundle_versions
 
 check_codex_login() {
-  doctor_server_only || return
   if [ "${DOCTOR_CI:-0}" = 1 ]; then echo "login check skipped in --ci"; return 2; fi
   _codex_present || return 1
   codex login status >/dev/null 2>&1 && return 0

@@ -6,6 +6,17 @@
 
 modify_ helper: existing content on stdin, merged content on stdout.
 Usage: merge_codex_config.py MANAGED_TOML
+       merge_codex_config.py [--desktop] [--keep-on-error]
+           (MANAGED_TOML | --fragment-b64 B64) [--current-file PATH]
+--fragment-b64: the fragment as base64 (Windows modify-template, no temp file).
+--current-file: read the current config from PATH (missing: empty) instead of
+  stdin. Input and output are UTF-8 bytes on every OS.
+--desktop: a plain Desktop has only some MCP runtimes: a server whose `command`
+  is not on PATH is dropped with one warning (a `url` server is always kept),
+  and on Windows a .cmd/.bat/.ps1 command (npx from a Node install) becomes
+  `cmd /c <command> ...`, which Codex can start.
+--keep-on-error: when the merge or its check fails, warn and print the current
+  config unchanged (exit 0), for callers that cannot fall back themselves.
 
 Every key in the fragment replaces the existing one (tables merge key by key,
 arrays and arrays of tables are replaced whole). `mcp_servers` is replaced
@@ -17,7 +28,10 @@ every input key the fragment does not replace must keep its value at the same
 path, and every managed key must hold the fragment's value; otherwise it
 raises (exit 1), and the modify_ script keeps the current file.
 """
+import base64
+import os
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -120,11 +134,77 @@ def check(existing, managed, out):
         raise ValueError("merged config lost or changed: " + ", ".join(bad))
 
 
+SHIM_SUFFIXES = (".cmd", ".bat", ".ps1")
+
+
+def desktop_servers(managed, which=None, windows=None):
+    """The fragment with only the MCP servers this machine can start (see
+    --desktop). Prints one warning per dropped server."""
+    which = which or shutil.which
+    windows = (os.name == "nt") if windows is None else windows
+    doc = tomlkit.parse(managed)
+    servers = doc.get("mcp_servers")
+    if not servers:
+        return managed
+    for name in list(servers.keys()):
+        srv = servers[name]
+        if "url" in srv or "command" not in srv:
+            continue
+        cmd = str(srv["command"])
+        found = which(cmd)
+        if not found:
+            print(f"warning: {cmd} not found on this desktop; skipping Codex MCP server {name}", file=sys.stderr)
+            del servers[name]
+        elif windows and found.lower().endswith(SHIM_SUFFIXES):
+            srv["args"] = ["/c", cmd] + [str(a) for a in srv.get("args", [])]
+            srv["command"] = "cmd"
+    return tomlkit.dumps(doc)
+
+
 def main(argv):
-    if len(argv) != 2:
-        print("usage: merge_codex_config.py MANAGED_TOML", file=sys.stderr)
+    if len(argv) == 2 and not argv[1].startswith("--"):
+        sys.stdout.write(merge(sys.stdin.read(), Path(argv[1]).read_text()))
+        return 0
+    desktop = keep = False
+    frag = b64 = cur_file = None
+    args = argv[1:]
+    try:
+        while args:
+            a = args.pop(0)
+            if a == "--desktop":
+                desktop = True
+            elif a == "--keep-on-error":
+                keep = True
+            elif a == "--fragment-b64":
+                b64 = args.pop(0)
+            elif a == "--current-file":
+                cur_file = args.pop(0)
+            elif not a.startswith("--") and frag is None:
+                frag = a
+            else:
+                raise IndexError(a)
+        if (frag is None) == (b64 is None):
+            raise IndexError("fragment")
+    except IndexError:
+        print("usage: merge_codex_config.py [--desktop] [--keep-on-error] "
+              "(MANAGED_TOML | --fragment-b64 B64) [--current-file PATH]", file=sys.stderr)
         return 2
-    sys.stdout.write(merge(sys.stdin.read(), Path(argv[1]).read_text()))
+    if cur_file is not None:
+        p = Path(cur_file)
+        current = p.read_bytes().decode("utf-8") if p.exists() else ""
+    else:
+        current = sys.stdin.buffer.read().decode("utf-8")
+    try:
+        managed = base64.b64decode(b64).decode("utf-8") if b64 is not None else Path(frag).read_bytes().decode("utf-8")
+        if desktop:
+            managed = desktop_servers(managed)
+        out = merge(current, managed)
+    except Exception as e:  # noqa: BLE001 - every failure keeps the current file
+        if not keep:
+            raise
+        print(f"warning: merging the managed Codex config failed ({e}); ~/.codex/config.toml left unchanged", file=sys.stderr)
+        out = current
+    sys.stdout.buffer.write(out.encode("utf-8"))
     return 0
 
 

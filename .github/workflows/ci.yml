@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Windows PowerShell, as the irm | iex one-liner runs; -File so the exit status propagates.
-      # Doctor includes the Claude Code checks (login SKIPs in -Ci).
+      # Doctor includes the Claude Code and Codex checks (logins SKIP in -Ci).
       - name: bootstrap desktop, then doctor.ps1 -Ci
         run: |
           set -o pipefail

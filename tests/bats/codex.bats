@@ -384,3 +384,182 @@ EOF
   [[ "$stderr" == *"merged config lost or changed: note"* ]]
   [[ "$stderr" == *"warning: merging the managed Codex config failed"* ]]
 }
+
+# init_plain_desktop: a plain desktop config (the desktop role is refused on
+# Linux: write a server config and rewrite its data to the desktop role).
+init_plain_desktop() {
+  init_role server >&2
+  sed -e 's/^\( *role = \).*/\1"desktop"/' -e 's/^\( *isServer = \).*/\1false/' \
+      -e 's/^\( *isDesktop = \).*/\1true/' "$SB_CONFIG" > "$SB/cfg.new"
+  cat "$SB/cfg.new" > "$SB_CONFIG"
+}
+
+# render_os OS SRC OUT: SRC (repo-relative) rendered with .chezmoi.os replaced by OS.
+render_os() {
+  sed "s/\.chezmoi\.os/\"$1\"/g" "$REPO_ROOT/$2" | chezmoi_iso execute-template > "$3"
+}
+
+@test "plain desktop install script: runtime-guarded servers pre-warmed, config merged again, skips are not failures" {
+  command -v uv >/dev/null 2>&1 || skip "uv needed for the merge"
+  for c in graphify-mcp paper-search-mcp codebase-memory-mcp uvx; do
+    [ ! -e "/usr/bin/$c" ] && [ ! -e "/bin/$c" ] || skip "$c is in /usr/bin"
+  done
+  init_plain_desktop
+  render_os darwin "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
+  sh -n "$SB/codex.sh"
+  grep -qF -- '--desktop --keep-on-error "$frag" --current-file "$cfg"' "$SB/codex.sh"
+  fake_world "$SB/codex.sh"
+  rm -f "$STUB/codebase-memory-mcp"   # not installed here
+  : > "$SB/calls"
+  stub uvx "echo \"uvx \$*\" >> '$SB/calls'"
+  stub npx "echo \"npx \$*\" >> '$SB/calls'"   # never the host's npx
+  ln -s "$(command -v uv)" "$STUB/uv"
+  mkdir -p "$SB_HOME/.codex"
+  printf '[projects."/x/p"]\ntrust_level = "trusted"\n' > "$SB_HOME/.codex/config.toml"
+  run_script "$SB/codex.sh"
+  echo "$output"; cat "$SB/calls"
+  [ "$status" -eq 0 ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/55-codex" ]   # skips are not failures
+  [ "$(grep -c 'skipping its Codex skill and agents' <<<"$output")" -eq 1 ]
+  for s in codebase-memory-mcp graphify paper-search; do
+    [ "$(grep -c "skipping Codex MCP server $s\$" <<<"$output")" -eq 1 ] || { echo "no single skip warning for $s"; false; }
+  done
+  grep -qx "uvx --python 3.12 --from semble\[mcp\]==$(lock mcp-semble) semble --help" "$SB/calls"
+  grep -qx "npx -y @next-ai-drawio/mcp-server@$(lock mcp-drawio)" "$SB/calls"
+  c="$SB_HOME/.codex/config.toml"
+  run tool_timeouts "$c"
+  echo "$output"
+  [ "$output" = "semble 120
+drawio 120
+openaiDeveloperDocs 60" ]
+  grep -qx 'trust_level = "trusted"' "$c"
+  # links are still relative symlinks on macOS
+  [ "$(readlink "$SB_HOME/.codex/skills/caveman")" = "../skill-bundles/caveman-$(lock codex-bundle-caveman)/skills/caveman" ]
+}
+
+@test "server install script has no desktop guards, pre-warm or re-merge" {
+  render_tmpl "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
+  ! grep -qE 'skipped|prewarm|--desktop|not installed on this desktop' "$SB/codex.sh"
+  grep -qF 'warn "codebase-memory-mcp missing; skipping its Codex skill and agents"' "$SB/codex.sh"
+}
+
+@test "modify script: --desktop only on a plain desktop; windows renders a modify-template calling the ps1 helper" {
+  render_tmpl "$MODIFY" "$SB/server.sh"
+  ! grep -q -- '--desktop' "$SB/server.sh"
+  init_plain_desktop
+  render_os darwin "$MODIFY" "$SB/mac.sh"
+  grep -qF 'merge_codex_config.py --desktop "$frag"' "$SB/mac.sh"
+  render_os windows "$MODIFY" "$SB/win.txt"
+  echo "$(head -c 600 "$SB/win.txt")"
+  [ "$(sed -n 1p "$SB/win.txt")" = '{{- /* chezmoi:modify-template */ -}}' ]
+  [ "$(grep -c . "$SB/win.txt")" -eq 2 ]
+  second="$(sed -n 2p "$SB/win.txt")"
+  [[ "$second" == '{{- output "powershell" "-NoLogo" "-NoProfile" "-NonInteractive" "-ExecutionPolicy" "Bypass" "-File" '* ]]
+  [[ "$second" == *'/lib/merge_codex_config.ps1" "'*'/lib/merge_codex_config.py" "'* ]]
+  [[ "$second" == *'/.codex/config.toml" -}}' ]]
+  # the base64 argument is the rendered managed fragment
+  b64="$(printf '%s\n' "$second" | sed 's/.*merge_codex_config.py" "\([^"]*\)".*/\1/')"
+  printf '%s' "$b64" | base64 -d > "$SB/frag.toml"
+  grep -qx '\[mcp_servers.openaiDeveloperDocs\]' "$SB/frag.toml"
+  grep -qx 'url = "https://developers.openai.com/mcp"' "$SB/frag.toml"
+}
+
+@test "windows modify-template merges through PowerShell and uv; without uv the file is unchanged" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  init_plain_desktop
+  render_os windows "$MODIFY" "$SB/win.txt"
+  second="$(sed -n 2p "$SB/win.txt")"
+  [ -n "$second" ]
+  # Linux and macOS have no Windows PowerShell: `powershell` runs pwsh
+  command -v powershell >/dev/null 2>&1 || stub powershell 'exec pwsh "$@"'
+  mkdir -p "$SB_HOME/.codex"
+  printf '# mine\nservice_tier = "default"\n\n[projects."/x/p"]\ntrust_level = "trusted"\n' > "$SB_HOME/.codex/config.toml"
+  cp "$SB_HOME/.codex/config.toml" "$SB/cur.toml"
+  HOME="$SB_HOME" PATH="$STUB:$PATH" run --separate-stderr chezmoi_iso execute-template --with-stdin "$second" < "$SB/cur.toml"
+  echo "$output"; echo "stderr: $stderr"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$SB/out.toml"
+  grep -qx '# mine' "$SB/out.toml"
+  grep -qx 'trust_level = "trusted"' "$SB/out.toml"
+  grep -qx 'model = "gpt-6-astra"' "$SB/out.toml"
+  grep -qx '\[mcp_servers.openaiDeveloperDocs\]' "$SB/out.toml"
+  run tool_timeouts "$SB/out.toml"
+  [[ "$output" != *MISSING* ]]
+  # no uv on PATH: the current file comes back byte for byte, with a warning
+  cat > "$SB/nouv.ps1" <<'PSEOF'
+$env:PATH = ''
+& $args[0] $args[1] $args[2] $args[3]
+PSEOF
+  run --separate-stderr pwsh -NoProfile -File "$SB/nouv.ps1" "$REPO_ROOT/lib/merge_codex_config.ps1" x x "$SB/cur.toml"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(cat "$SB/cur.toml")" ]
+  [[ "$stderr" == *"warning: uv missing"* ]]
+}
+
+@test "windows install script: official installer, cbm in a scratch home, junctions, re-merge" {
+  init_plain_desktop
+  render_os windows "home/.chezmoiscripts/run_onchange_after_55-codex.ps1.tmpl" "$SB/codex.ps1"
+  f="$SB/codex.ps1"
+  grep -qF '/scripts/install/install.ps1" -OutFile $inst' "$f"
+  grep -qF "\$codexVersion = '$(lock codex)'" "$f"
+  grep -qF "\$env:CODEX_NON_INTERACTIVE = '1'" "$f"
+  ! grep -q 'CODEX_INSTALL_DIR' "$f"   # its bin dir becomes a junction: never ~/.local/bin
+  grep -qF '& codebase-memory-mcp install -y --skip-binary --clients=codex' "$f"
+  grep -qF 'New-Item -ItemType Junction -Path $dst -Target $target' "$f"
+  grep -qF -- '--desktop --keep-on-error --fragment-b64 $fragB64 --current-file' "$f"
+  grep -qF "Invoke-Prewarm help (Get-McpCommandLine @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble'))" "$f"
+  grep -qF "Invoke-Prewarm stdin (Get-McpCommandLine @('npx', '-y', '@next-ai-drawio/mcp-server@$(lock mcp-drawio)'))" "$f"
+  n=0; for b in $(sed -n "s/^Install-Bundle '\([^']*\)'.*/\1/p" "$f"); do n=$((n + 1)); done
+  [ "$n" -eq "$(grep -c '^    - { name: codex-bundle-' "$REPO_ROOT/home/.chezmoidata/manifest.yaml")" ]
+  grep -q '^# retry: $' "$f"
+  ! grep -qiE 'codex login|setup-token' "$f"
+  ! grep -qE '/home/|/ldaphome|/Users/|C:\\Users' "$f"
+  if command -v pwsh >/dev/null 2>&1; then
+    cat > "$SB/parse.ps1" <<'PSEOF'
+$e = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$e)
+if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }
+exit 0
+PSEOF
+    cp "$f" "$f.ps1"
+    run pwsh -NoProfile -File "$SB/parse.ps1" "$f.ps1"
+    echo "$output"
+    [ "$status" -eq 0 ]
+  fi
+}
+
+@test "doctor codex checks on a plain desktop expect only the servers and skills present there" {
+  command -v uv >/dev/null 2>&1 || skip "uv needed for the merge"
+  init_plain_desktop
+  render_os darwin "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
+  fake_world "$SB/codex.sh"
+  rm -f "$STUB/codebase-memory-mcp"
+  stub uvx 'exit 0'; stub npx 'exit 0'
+  ln -s "$(command -v uv)" "$STUB/uv"
+  run_script "$SB/codex.sh"
+  [ "$status" -eq 0 ]
+  mkdir -p "$SB_HOME/.codex/skills/codex-queue-workflow"; : > "$SB_HOME/.codex/skills/codex-queue-workflow/SKILL.md"
+  cat > "$STUB/codex" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "--version "*) echo "codex-cli $(lock codex)" ;;
+  "login status") exit 1 ;;
+esac
+EOF
+  chmod +x "$STUB/codex"
+  mkdir -p "$SB/sys"
+  for t in sh bash env awk sed grep cat sort head tail tr cut readlink dirname basename uname; do
+    p="$(command -v "$t")" && ln -sf "$p" "$SB/sys/$t"
+  done
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$SB/sys" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for c in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $c"* ]]; done
+  [[ "$output" == *"SKIP codex_login: login check skipped in --ci"* ]]
+  [[ "$output" != *"server role only"* ]]
+  # a server role expects every server and the codebase-memory skill
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$SB/sys" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"FAIL codex_mcp: MCP server(s) missing from config.toml: codebase-memory-mcp graphify paper-search"* ]]
+  [[ "$output" == *"FAIL codex_skills: not installed: codebase-memory"* ]]
+}

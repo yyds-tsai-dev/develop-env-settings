@@ -23,7 +23,7 @@ Bootstrap installs chezmoi and uv into `~/.local/bin`, resolves the Version lock
 | Role | OS | Gets |
 |---|---|---|
 | `server` | Linux x86_64 | Full environment under userland paths |
-| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, Claude Code (same user files, plugins, skills and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists). No Codex |
+| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, Claude Code and Codex (same user files, plugins, skills, bundles and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists, and Codex bundle skills are directory junctions) |
 | `desktop+server` | macOS | Both, Server tools through Homebrew; zsh (`~/.zshrc` block) starts fish |
 
 A Windows Server use goes through WSL2 with role `server`.
@@ -32,7 +32,7 @@ A Windows Server use goes through WSL2 with role `server`.
 
 - `bw login`, `export BW_SESSION=$(bw unlock --raw)`, `bw sync`, then apply again. The first apply on a new machine always skips Secret files.
 - Paste the printed SSH public key at https://github.com/settings/ssh/new.
-- Log in with `claude` (every role) and `codex login` (server roles).
+- Log in with `claude` and `codex login` (every role).
 - Run any admin-rights commands Bootstrap printed.
 
 Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Codex bundle version drift or a missing status line.
