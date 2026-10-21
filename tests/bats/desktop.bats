@@ -16,7 +16,7 @@ setup() {
   STUB="$SB/stub"; mkdir -p "$STUB"
   HOST_OS="$(uname -s)"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 is_windows() { case "$HOST_OS" in MINGW*|MSYS*|CYGWIN*) return 0 ;; *) return 1 ;; esac; }
 

@@ -19,7 +19,7 @@ setup() {
   new_sandbox
   STUB="$SB/stub"; mkdir -p "$STUB"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 lock() { sed -n "s/^  $1: *'\{0,1\}\([^']*\)'\{0,1\}$/\1/p" "$REPO_ROOT/home/.chezmoidata/versions.yaml"; }
 

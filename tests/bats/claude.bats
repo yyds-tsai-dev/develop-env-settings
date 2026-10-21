@@ -15,7 +15,7 @@ setup() {
   new_sandbox
   STUB="$SB/stub"; mkdir -p "$STUB"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 MANIFEST() { echo "$REPO_ROOT/home/.chezmoidata/manifest.yaml"; }
 

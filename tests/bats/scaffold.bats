@@ -3,7 +3,7 @@
 load helpers
 
 setup() { new_sandbox; HOST_OS="$(uname -s)"; }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 is_linux() { [ "$HOST_OS" = Linux ]; }
 is_darwin() { [ "$HOST_OS" = Darwin ]; }

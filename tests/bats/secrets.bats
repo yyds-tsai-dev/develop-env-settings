@@ -15,7 +15,7 @@ setup() {
   [ "$(uname -s)" = Linux ] || skip "server-role Secret tests need a linux host (this host: $(uname -s))"
   init_role server >&2
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 # stub_bw STATUS: fake `bw` reporting STATUS (unlocked|locked|unauthenticated).
 stub_bw() {

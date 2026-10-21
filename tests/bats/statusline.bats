@@ -11,7 +11,7 @@ setup() {
   printf '#!/bin/sh\ncase "$1" in -s) echo Linux;; -m) echo x86_64;; *) echo Linux;; esac\n' > "$STUB/uname"
   chmod +x "$STUB/uname"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 # render_with LOCK: render the script with the statusline lock set (empty = none).
 render_with() {

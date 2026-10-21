@@ -9,7 +9,7 @@ setup() {
   STUB="$SB/stub"; mkdir -p "$STUB"
   command -v ssh-keygen >/dev/null 2>&1 || skip "ssh-keygen not installed"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 stub_ssh() {  # stub_ssh TEXT: fake `ssh` that prints TEXT and exits 1 (like github)
   printf '#!/bin/sh\necho "%s" >&2\nexit 1\n' "$1" > "$STUB/ssh"; chmod +x "$STUB/ssh"

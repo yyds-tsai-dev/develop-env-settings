@@ -11,7 +11,7 @@ setup() {
   new_sandbox
   H="$SB/h"; STUB="$SB/stub"; mkdir -p "$H" "$STUB"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
 
@@ -105,6 +105,7 @@ EOF
 @test "micromamba, node and statusline scripts leave a retry marker when downloads fail" {
   [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
   stub curl 'exit 22'
+  stub go 'exit 127'   # shadow any runner go: this test is about the download-failure marker, not the local build
   for s in 10-micromamba-envs 20-node 60-statusline; do
     f="$(render "run_onchange_after_$s.sh.tmpl")"
     grep -qx '# retry: ' "$f"

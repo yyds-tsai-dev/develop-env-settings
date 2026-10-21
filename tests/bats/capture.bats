@@ -31,7 +31,7 @@ esac'
            "$SB_HOME/.vscode-server/extensions/Foo.Bar-1.2.4"
   echo '[]' > "$SB_HOME/.vscode-server/extensions/extensions.json"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 # stub NAME BODY: executable stub script on the stub PATH. uv is special: a
 # `uv run --script` call is forwarded to the real uv/python so the capture script runs.

@@ -11,7 +11,7 @@ setup() {
   new_sandbox
   H="$SB/h"; STUB="$SB/stub"; mkdir -p "$H" "$STUB"
 }
-teardown() { rm -rf "$SB"; }
+teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
 # render SCRIPT_BASENAME: render a home/.chezmoiscripts template for the server role.
 render() {
