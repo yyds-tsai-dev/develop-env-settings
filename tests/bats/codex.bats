@@ -286,6 +286,22 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
   ! grep -q '^bundle ' "$SB_HOME/.codex/skill-bundles/.devenv-skills"
 }
 
+@test "a bundle without a locked version warns and leaves no retry marker" {
+  init_role server >&2
+  { printf '{{ $_ := unset .versions "codex-bundle-caveman" }}'; cat "$REPO_ROOT/home/.chezmoiscripts/$SCRIPT"; } \
+    | chezmoi_iso execute-template > "$SB/codex.sh"
+  sh -n "$SB/codex.sh"
+  ! grep -q "^bundle 'codex-bundle-caveman'" "$SB/codex.sh"
+  fake_world "$SB/codex.sh"
+  run_script "$SB/codex.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: codex-bundle-caveman: no locked version; skipped (run bin/update)"* ]]
+  [[ "$output" != *"55-codex had failures"* ]]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/55-codex" ]
+  grep -q '^bundle codex-bundle-superpowers ' "$SB_HOME/.codex/skill-bundles/.devenv-skills"
+}
+
 @test "doctor codex checks: pass with everything present, login skips in --ci" {
   command -v uv >/dev/null 2>&1 || skip "uv needed for the merge"
   render_tmpl "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"

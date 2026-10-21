@@ -12,7 +12,8 @@ check_chezmoi_present() {
 register check_chezmoi_present
 
 # WARN (never FAIL): an install script failed (download, or a prerequisite not
-# there yet) and left a retry marker; the next apply reruns it.
+# there yet) and left a retry marker holding a nonce; every apply reruns it
+# until it succeeds.
 check_install_retries() {
   local d="$HOME/.local/state/develop-env/retry" f pending=
   for f in "$d"/*; do [ -e "$f" ] && pending="$pending ${f##*/}"; done

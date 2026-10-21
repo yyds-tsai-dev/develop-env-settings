@@ -5,12 +5,19 @@
 # fnm default. Old Node installs (~/.nvm, ~/.local/node-v*) are left alone;
 # bin/cleanup removes them. Never aborts apply.
 # fnm ships only a .zip and the Server has no unzip, so uv's Python extracts it.
+# A failed download or install leaves a retry marker with a fresh nonce, so the
+# next apply (bin/update) reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "20-node") }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 FNM="$HOME/.local/bin/fnm"
 FNM_VERSION="{{ index .versions "fnm" }}"
 
 warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "20-node" }}
+# fail MSG: a download or install failed; the next apply retries.
+fail() { warn "$*"; FAILED=1; }
+FAILED=
 
 if [ "$("$FNM" --version 2>/dev/null)" != "fnm $FNM_VERSION" ]; then
     tmp="$(mktemp -d)"
@@ -27,17 +34,17 @@ if [ "$("$FNM" --version 2>/dev/null)" != "fnm $FNM_VERSION" ]; then
             mkdir -p "$HOME/.local/bin"
             chmod 0755 "$tmp/x/fnm" && mv -f "$tmp/x/fnm" "$FNM"
         else
-            warn "could not extract fnm $FNM_VERSION"
+            fail "could not extract fnm $FNM_VERSION"
         fi
     else
-        warn "could not download fnm $FNM_VERSION"
+        fail "could not download fnm $FNM_VERSION"
     fi
     rm -rf "$tmp"
 fi
-[ -x "$FNM" ] || { warn "fnm missing; skipping Node"; exit 0; }
+[ -x "$FNM" ] || { warn "fnm missing; skipping Node (bin/update retries)"; retry_mark; exit 0; }
 
-fnm install {{ .node.major }} || { warn "fnm install {{ .node.major }} failed"; exit 0; }
-fnm default {{ .node.major }} || warn "fnm default {{ .node.major }} failed"
+fnm install {{ .node.major }} || { warn "fnm install {{ .node.major }} failed (bin/update retries)"; retry_mark; exit 0; }
+fnm default {{ .node.major }} || fail "fnm default {{ .node.major }} failed"
 
 # Link the default Node's node/npm/npx/corepack into ~/.local/bin so
 # non-interactive processes (Claude Code MCP servers via npx) find them ahead of
@@ -58,5 +65,6 @@ if [ -n "$bin" ] && [ -x "$bin/node" ]; then
 else
     warn "fnm has no default Node; node/npm/npx not linked into ~/.local/bin"
 fi
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
 exit 0
 {{- end }}

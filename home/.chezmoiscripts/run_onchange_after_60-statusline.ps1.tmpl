@@ -6,9 +6,14 @@ for a future Windows server role. */ -}}
 # Installs the Claude Code status line binary to ~/.claude/statusline-bin.exe.
 # Locked release (tag statusline-v<version>): downloads statusline-windows-amd64.exe.
 # No release locked yet: builds statusline/ locally when `go` exists, else warns.
-# Never aborts apply.
+# Never aborts apply. A failure (the release download, or no binary at the end)
+# leaves a retry marker with a fresh nonce, so the next apply reruns this after
+# every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "60-statusline") }}
 # Lock: statusline={{ $sl }}
 $ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "60-statusline" }}
+$failed = $false
 $version = '{{ $sl }}'
 $srcDir = Join-Path '{{ .chezmoi.sourceDir }}' '../statusline'
 $dest = Join-Path $HOME '.claude/statusline-bin.exe'
@@ -20,9 +25,11 @@ try {
             $tmp = "$dest.tmp"
             Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $url -OutFile $tmp
             Move-Item -Force $tmp $dest
+            Clear-RetryMarker
             exit 0
         } catch {
             Write-Warning "could not download ${url}: $_"
+            $failed = $true
         }
     }
     if ((Get-Command go -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $srcDir 'main.go'))) {
@@ -30,13 +37,16 @@ try {
         try {
             $env:CGO_ENABLED = '0'
             & go build -trimpath -ldflags='-s -w' -o $dest .
-            if ($LASTEXITCODE -ne 0) { Write-Warning 'local status line build failed' }
+            if ($LASTEXITCODE -ne 0) { Write-Warning 'local status line build failed'; $failed = $true }
         } finally { Pop-Location }
-        exit 0
+    } else {
+        Write-Warning 'status line not installed (no release download and no go on PATH)'
+        $failed = $true
     }
-    Write-Warning 'status line not installed (no release locked and no go on PATH)'
 } catch {
     Write-Warning "status line install failed: $_"
+    $failed = $true
 }
+if ($failed) { Set-RetryMarker } else { Clear-RetryMarker }
 exit 0
 {{- end }}

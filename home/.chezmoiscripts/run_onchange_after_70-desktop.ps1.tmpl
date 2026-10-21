@@ -3,8 +3,13 @@
 # and JetBrainsMono Nerd Font (latest Nerd Fonts release) into the per-user
 # font dir. No admin rights: a package whose installer has no user scope is
 # printed, at the end, as the elevated winget command to run. Already installed
-# packages are skipped. Never aborts apply.
+# packages are skipped. Never aborts apply. A failed font download leaves a
+# retry marker with a fresh nonce, so the next apply reruns this after every
+# failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "70-desktop") }}
 $ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "70-desktop" }}
+$failed = $false
 $admin = @()
 
 $packages = @('wez.wezterm', 'Git.Git', 'GitHub.cli', 'Microsoft.VisualStudioCode')
@@ -39,7 +44,8 @@ if (-not (Test-Path (Join-Path $fonts 'JetBrainsMonoNerdFont-Regular.ttf'))) {
             New-ItemProperty -Path $reg -Name "$($f.BaseName) (TrueType)" -Value $dest -PropertyType String -Force | Out-Null
         }
     } catch {
-        Write-Warning "could not install JetBrainsMono Nerd Font: $_"
+        Write-Warning "could not install JetBrainsMono Nerd Font (re-running the bootstrap one-liner retries): $_"
+        $failed = $true
     } finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
@@ -49,5 +55,6 @@ if ($admin.Count -gt 0) {
     Write-Output 'These steps need admin rights; run them in an elevated PowerShell, then apply again:'
     $admin | ForEach-Object { Write-Output "  $_" }
 }
+if ($failed) { Set-RetryMarker } else { Clear-RetryMarker }
 exit 0
 {{- end }}

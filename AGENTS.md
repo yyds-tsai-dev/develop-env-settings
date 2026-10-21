@@ -30,7 +30,7 @@ Stop and ask; do not attempt these yourself.
 
 ## Done
 
-Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Codex bundle version drift or a missing status line. Report the remaining person-only steps and every WARN to the person. A FAIL hint names the command to run (`bin/update`, or re-run Bootstrap).
+Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Codex bundle version drift or a missing status line. Report the remaining person-only steps and every WARN to the person. A FAIL hint names the command to run (`bin/update`, or re-run Bootstrap; `chezmoi state delete-bucket --bucket=entryState && bin/update` when the install script succeeded earlier and must be forced to rerun).
 
 ## Migration notes for existing machines
 
@@ -43,6 +43,6 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - Update: `bin/update` (resets the local Version lock, pulls, runs Bootstrap again). Windows: re-run the `irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex` one-liner.
 - Capture: `bin/capture` pulls machine changes back (`chezmoi re-add`, VS Code server extensions, manifest membership). It prints `git diff --stat` and never commits; review and commit yourself.
 - Rollback: `cd "$(chezmoi source-path)/.." && git checkout <rev> -- home/.chezmoidata/versions.yaml && chezmoi apply`.
-- Retry every install script: `chezmoi state delete-bucket --bucket=entryState` (run_onchange_ scripts; `--bucket=scriptState` for run_once_), then `bin/update`.
+- Retrying installs: a failed install script leaves a retry marker with a fresh nonce in `~/.local/state/develop-env/retry/`, so every `bin/update` (Windows: the one-liner) reruns it until it succeeds. To rerun scripts that succeeded earlier (something they installed was removed later): `chezmoi state delete-bucket --bucket=entryState` (run_onchange_ scripts; `--bucket=scriptState` for run_once_), then `bin/update`.
 - Tests: `.tools/bin/bats tests/bats` (set `DEVENV_SKIP_DOCKER=1` to skip the Docker tests) and `uv run --with pytest --with pyyaml --with httpx --with tomlkit pytest tests/py`. Tests use sandbox HOMEs under `/tmp`, never the real home.
 - Commit messages are in English. Push and open PRs only after the person agrees.

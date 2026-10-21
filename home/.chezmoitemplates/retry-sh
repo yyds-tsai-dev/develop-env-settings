@@ -1,0 +1,13 @@
+{{- /*
+retry-sh: shell helpers for the retry marker (see retry-marker). Input: the
+marker name, e.g. {{ template "retry-sh" "50-claude" }}. Defines RETRY (the
+marker path), retry_mark (write a fresh nonce: date +%s%N, or date +%s plus
+the PID where %N is unsupported, e.g. macOS) and retry_clear (delete it).
+*/ -}}
+RETRY="$HOME/.local/state/develop-env/retry/{{ . }}"
+retry_mark() {
+    retry_nonce="$(date +%s%N 2>/dev/null)"
+    case "$retry_nonce" in ''|*[!0-9]*) retry_nonce="$(date +%s 2>/dev/null).$$" ;; esac
+    mkdir -p "${RETRY%/*}" && printf '%s\n' "$retry_nonce" > "$RETRY"
+}
+retry_clear() { rm -f "$RETRY"; }

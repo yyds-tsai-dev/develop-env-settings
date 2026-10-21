@@ -14,8 +14,13 @@ DOCTOR_CI=0
 [ "${1:-}" = "--ci" ] && DOCTOR_CI=1
 export DOCTOR_CI
 # What to run to retry installs and re-apply: checks quote it in their hints.
+# DOCTOR_FIX is enough when the owning install script failed (it left a retry
+# marker, so the next apply reruns it) or a managed file is missing.
+# DOCTOR_FORCE also reruns install scripts that succeeded earlier (their output
+# was removed or broke later), which apply alone never reruns.
 DOCTOR_FIX="run $ROOT/bin/update (or re-run bootstrap)"
-export DOCTOR_FIX
+DOCTOR_FORCE="run chezmoi state delete-bucket --bucket=entryState && $ROOT/bin/update"
+export DOCTOR_FIX DOCTOR_FORCE
 
 # Role: chezmoi's .role, else $DEVENV_ROLE, else server on Linux and desktop
 # elsewhere. Exported as DOCTOR_ROLE; server-only checks call doctor_server_only.

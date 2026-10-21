@@ -3,13 +3,18 @@
 # Linux Server and macOS Desktop + Server.
 # Installs the manifest uv tools at their locked versions (executables land in
 # ~/.local/bin). A pin that fails is retried unpinned with a warning. Reruns when
-# a pin changes. Never aborts apply.
+# a pin changes. Never aborts apply. A tool that fails even unpinned (or uv
+# missing) leaves a retry marker with a fresh nonce, so the next apply
+# (bin/update) reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "30-uv-tools") }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 
 warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "30-uv-tools" }}
+FAILED=
 
-command -v uv >/dev/null 2>&1 || { warn "uv missing; skipping uv tools"; exit 0; }
+command -v uv >/dev/null 2>&1 || { warn "uv missing; skipping uv tools (bin/update retries)"; retry_mark; exit 0; }
 
 # Python 3.12: every tool's compiled dependencies ship wheels for it, while the
 # newest CPython often lacks them and the Server has no C compiler.
@@ -22,11 +27,12 @@ tool() {
         *==*) warn "uv tool install $1 failed; retrying unpinned"
               uv tool install --quiet --python "$PY" "${1%%==*}" && return 0 ;;
     esac
-    warn "uv tool install ${1%%==*} failed"
+    warn "uv tool install ${1%%==*} failed (bin/update retries)"; FAILED=1
 }
 {{  range .uv_tools }}
 {{- $v := index $.versions .name }}
 tool {{ if $v }}{{ printf "%s==%s" .spec $v | quote }}{{ else }}{{ .spec | quote }}{{ end }}
 {{- end }}
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
 exit 0
 {{- end }}

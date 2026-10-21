@@ -464,12 +464,12 @@ EOF
     sh -n "$f"
     grep -qx "# brew: $want" "$f" || { echo "$s: no brew marker"; false; }
   done
-  # 70-desktop: a failed font download leaves a retry marker that the next render shows
+  # 70-desktop: a failed font download leaves a retry marker whose nonce the next render shows
   f="$(render_for darwin run_onchange_after_70-desktop.sh.tmpl)"
   grep -qx '# retry: ' "$f"
-  mkdir -p "$SB_HOME/.local/state/develop-env/retry"; : > "$SB_HOME/.local/state/develop-env/retry/70-desktop"
+  mkdir -p "$SB_HOME/.local/state/develop-env/retry"; echo 1700000000.42 > "$SB_HOME/.local/state/develop-env/retry/70-desktop"
   f="$(render_for darwin run_onchange_after_70-desktop.sh.tmpl)"
-  grep -qx '# retry: retry' "$f"
+  grep -qx '# retry: 1700000000.42' "$f"
 }
 
 @test "bw script links npm's bw into ~/.local/bin, never over a regular file" {
@@ -503,11 +503,13 @@ EOF
   rm "$SB_HOME/.local/bin/bw"
   HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
   [ -L "$SB_HOME/.local/bin/bw" ]
-  # no npm: warns, exits 0, leaves a retry marker
+  # no npm: warns, exits 0, leaves a retry marker; each failure writes a new nonce
   rm "$STUB/npm"
   HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
   [ "$status" -eq 0 ]
-  [ -e "$SB_HOME/.local/state/develop-env/retry/25-bw" ]
+  n1="$(cat "$SB_HOME/.local/state/develop-env/retry/25-bw")"; [ -n "$n1" ]
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f"
+  n2="$(cat "$SB_HOME/.local/state/develop-env/retry/25-bw")"; [ -n "$n2" ] && [ "$n2" != "$n1" ]
 }
 
 @test "doctor puts ~/.local/bin first and finds bw there; paper-search check is server only" {
@@ -529,7 +531,8 @@ EOF
   done
   DEVENV_ROLE=server HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
-  [[ "$output" == *"WARN statusline_installed:"*"bin/update"* ]]
+  [[ "$output" == *"WARN statusline_installed:"*"release download failed"*"bin/update"* ]]
+  [[ "$output" != *"no statusline release locked"* ]]
 }
 
 @test "macOS ~/.zshrc renders through the real ignore and sources cleanly" {

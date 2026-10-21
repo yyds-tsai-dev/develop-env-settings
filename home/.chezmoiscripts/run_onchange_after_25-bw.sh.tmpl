@@ -8,15 +8,16 @@
 # bw is linked into ~/.local/bin (never over a regular file), where Doctor and
 # chezmoi's lookPath find it without fnm's environment.
 # Warns and exits 0 on any failure; never aborts apply. A failure leaves a retry
-# marker, so the next apply (bin/update) reruns this script.
-# retry: {{ if stat (joinPath .chezmoi.homeDir ".local/state/develop-env/retry/25-bw") }}retry{{ end }}
+# marker with a fresh nonce, so the next apply (bin/update) reruns this script
+# after every failure; success removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "25-bw") }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 BW_VERSION="{{ index .versions "bw" }}"
 
 warn() { echo "warning: $*" >&2; }
-RETRY="$HOME/.local/state/develop-env/retry/25-bw"
-retry() { warn "$*"; mkdir -p "${RETRY%/*}" && : > "$RETRY"; exit 0; }
+{{ template "retry-sh" "25-bw" }}
+retry() { warn "$*"; retry_mark; exit 0; }
 
 # Use fnm's default Node (npm global prefix then lives inside fnm's dir).
 if command -v fnm >/dev/null 2>&1; then
@@ -43,6 +44,6 @@ if [ -e "$HOME/.local/bin/bw" ] && [ ! -L "$HOME/.local/bin/bw" ]; then
 else
     mkdir -p "$HOME/.local/bin" && ln -sfn "$nbw" "$HOME/.local/bin/bw"
 fi
-rm -f "$RETRY"
+retry_clear
 exit 0
 {{- end }}

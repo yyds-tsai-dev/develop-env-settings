@@ -6,7 +6,10 @@
 # ncurses tools, ...), which would shadow system tools on PATH.
 # An existing symlink is replaced; an existing regular file is left alone with a
 # warning. tmux is linked only when the system lacks one (it is still installed
-# in the env); a system tmux stays first on PATH. Reruns when a pin changes.
+# in the env); a system tmux stays first on PATH. Reruns when a pin changes, and
+# with 10-micromamba-envs while that script retries (its retry marker below), so
+# links follow envs a retry installed.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "10-micromamba-envs") }}
 MAMBA_ROOT_PREFIX="$HOME/micromamba"
 BIN="$HOME/.local/bin"
 mkdir -p "$BIN"

@@ -75,6 +75,8 @@ EOF
   grep -q 'create .*-n cli-tools' "$H/mm.log"
   run grep -q 'create .*-n pdftools' "$H/mm.log"; [ "$status" -ne 0 ]
   grep -q 'install .*-n pdftools' "$H/mm.log"
+  # every package ended up installed (tmux unpinned): no retry pending
+  [ ! -e "$H/.local/state/develop-env/retry/10-micromamba-envs" ]
 }
 
 @test "symlinks script links only manifest package binaries" {
@@ -131,6 +133,7 @@ EOF
   done
   [ "$(cat "$H/.local/bin/corepack")" = keep ]
   [[ "$output" == *"corepack is a regular file"* ]]
+  [ ! -e "$H/.local/state/develop-env/retry/20-node" ]   # a kept file is not a retry
   run env HOME="$H" PATH="/usr/bin:/bin" sh "$f"   # idempotent
   [ "$status" -eq 0 ]
   [ "$(readlink "$H/.local/bin/npx")" = "$fd/aliases/default/bin/npx" ]
@@ -338,6 +341,13 @@ EOF2
   HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [[ "$output" == *"WARN install_retries: install scripts waiting for a retry: 50-claude: run $REPO_ROOT/bin/update (or re-run bootstrap)"* ]]
+}
+
+@test "doctor: missing tool links name the forced rerun, since apply alone never reruns the links script" {
+  DEVENV_ROLE=server HOME="$H" DOCTOR_ONLY='10-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"FAIL cli_tools_linked: not in ~/.local/bin:"*": run chezmoi state delete-bucket --bucket=entryState && $REPO_ROOT/bin/update"* ]]
+  [[ "$output" == *"FAIL micromamba_envs:"* ]]
 }
 
 @test "codex install script leaves a retry marker when downloads fail" {

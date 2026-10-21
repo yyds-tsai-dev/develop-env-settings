@@ -1,0 +1,13 @@
+{{- /*
+retry-ps1: PowerShell twin of retry-sh. Input: the marker name, e.g.
+{{ template "retry-ps1" "25-bw" }}. Defines $retryMarker, Set-RetryMarker
+(writes a fresh GUID nonce, ASCII without BOM) and Clear-RetryMarker.
+*/ -}}
+$retryMarker = Join-Path $HOME '.local/state/develop-env/retry/{{ . }}'
+function Set-RetryMarker {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $retryMarker) | Out-Null
+        [IO.File]::WriteAllText($retryMarker, [guid]::NewGuid().ToString())
+    } catch { Write-Warning "could not write the retry marker ${retryMarker}: $_" }
+}
+function Clear-RetryMarker { Remove-Item -Force -ErrorAction SilentlyContinue $retryMarker }

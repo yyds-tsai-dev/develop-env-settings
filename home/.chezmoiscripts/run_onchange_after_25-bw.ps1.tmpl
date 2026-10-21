@@ -3,7 +3,11 @@
 # ~/.local/bin (no admin). As on Linux, the first apply on a new machine runs
 # before bw exists, so Secret files are skipped with a warning; run `bw login`,
 # `$env:BW_SESSION = bw unlock --raw`, `bw sync`, then apply again. Never aborts apply.
+# A failed download leaves a retry marker with a fresh nonce, so the next apply
+# reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "25-bw") }}
 $ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "25-bw" }}
 $version = '{{ index .versions "bw" }}'
 $bin = Join-Path $HOME '.local/bin'
 $exe = Join-Path $bin 'bw.exe'
@@ -13,7 +17,7 @@ try {
     if ((($userPath -split ';') | Where-Object { $_ -eq $bin }).Count -eq 0) {
         [Environment]::SetEnvironmentVariable('Path', ((@($userPath, $bin) | Where-Object { $_ }) -join ';'), 'User')
     }
-    if ((Test-Path $exe) -and ((& $exe --version 2>$null) -eq $version)) { exit 0 }
+    if ((Test-Path $exe) -and ((& $exe --version 2>$null) -eq $version)) { Clear-RetryMarker; exit 0 }
     New-Item -ItemType Directory -Force -Path $bin | Out-Null
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ("bw-" + [guid]::NewGuid())
     New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -22,8 +26,10 @@ try {
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     Move-Item -Force (Join-Path $tmp 'bw.exe') $exe
     Remove-Item -Recurse -Force $tmp
+    Clear-RetryMarker
 } catch {
-    Write-Warning "could not install bw ${version}: $_"
+    Write-Warning "could not install bw ${version} (re-running the bootstrap one-liner retries): $_"
+    Set-RetryMarker
 }
 exit 0
 {{- end }}

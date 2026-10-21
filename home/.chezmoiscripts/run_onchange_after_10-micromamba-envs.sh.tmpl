@@ -3,7 +3,11 @@
 # Installs micromamba (locked version) into ~/.local/bin and the `cli-tools` and
 # `pdftools` envs from the manifest at their locked versions. Reruns when a pin
 # changes. Never removes an env: an existing env is installed into, not recreated.
-# A pin that fails to install is retried unpinned with a warning.
+# A pin that fails to install is retried unpinned with a warning. Never aborts
+# apply. A failed download, or a package that fails even unpinned, leaves a
+# retry marker with a fresh nonce, so the next apply (bin/update) reruns this
+# after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "10-micromamba-envs") }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 MAMBA_ROOT_PREFIX="$HOME/micromamba"
@@ -12,6 +16,10 @@ MM="$HOME/.local/bin/micromamba"
 MM_VERSION="{{ index .versions "micromamba" }}"
 
 warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "10-micromamba-envs" }}
+# fail MSG: a download or install failed; the next apply retries.
+fail() { warn "$*"; FAILED=1; }
+FAILED=
 
 if [ "$("$MM" --version 2>/dev/null)" != "${MM_VERSION%-*}" ]; then
     mkdir -p "$HOME/.local/bin"
@@ -20,10 +28,10 @@ if [ "$("$MM" --version 2>/dev/null)" != "${MM_VERSION%-*}" ]; then
         chmod 0755 "$MM.tmp" && mv -f "$MM.tmp" "$MM"
     else
         rm -f "$MM.tmp"
-        warn "could not download micromamba $MM_VERSION"
+        fail "could not download micromamba $MM_VERSION"
     fi
 fi
-[ -x "$MM" ] || { warn "micromamba missing; skipping envs"; exit 0; }
+[ -x "$MM" ] || { warn "micromamba missing; skipping envs (bin/update retries)"; retry_mark; exit 0; }
 
 # mm_add ENV SPEC...: create ENV (if missing) or install into it.
 mm_add() {
@@ -44,7 +52,7 @@ ensure_env() {
         mm_add "$env" "$spec" && continue
         pkg="${spec%%==*}"
         warn "$env: $spec failed to install; retrying $pkg unpinned"
-        mm_add "$env" "$pkg" || warn "$env: $pkg failed to install"
+        mm_add "$env" "$pkg" || fail "$env: $pkg failed to install"
     done
     return 0
 }
@@ -58,5 +66,6 @@ ensure_env {{ if eq $group "cli_tools" }}cli-tools{{ else }}pdftools{{ end }}
 {{-   end }}
 {{- end }}
 {{  end }}
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
 exit 0
 {{- end }}

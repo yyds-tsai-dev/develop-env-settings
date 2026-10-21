@@ -62,9 +62,10 @@ check_claude_mcp() {
     fi
   done
   [ -z "$missing$failed" ] && return 0
-  [ -n "$missing" ] && echo "MCP server(s) not registered:$missing"
-  [ -n "$failed" ] && echo "MCP server(s) not connecting:$failed"
-  echo "$DOCTOR_FIX"
+  # A server that is registered but not connecting is not a failed install
+  # step (50-claude left no marker); its binary usually went missing.
+  [ -n "$missing" ] && echo "MCP server(s) not registered:$missing: $DOCTOR_FIX"
+  [ -n "$failed" ] && echo "MCP server(s) not connecting:$failed: $DOCTOR_FORCE"
   return 1
 }
 register check_claude_mcp
@@ -85,7 +86,7 @@ register check_claude_skills
 check_statusline_installed() {
   doctor_server_only || return
   [ -x "$HOME/.claude/statusline-bin" ] && return 0
-  echo "~/.claude/statusline-bin missing (no statusline release locked and no go to build it): install go or wait for a release, then $DOCTOR_FIX"; return 3
+  echo "~/.claude/statusline-bin missing (the statusline release download failed and no go to build it): $DOCTOR_FIX"; return 3
 }
 register check_statusline_installed
 

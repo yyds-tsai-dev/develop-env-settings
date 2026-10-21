@@ -286,17 +286,20 @@ zsh_apply() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"warning:"* ]]
   grep -q -- '--max-time 30' "$SB/script.sh"
-  # the failure leaves a retry marker, which changes the next render (chezmoi reruns it)
-  [ -e "$h/.local/state/develop-env/retry/20-fish-plugins" ]
+  # the failure leaves a retry marker holding a nonce, which changes the next
+  # render (chezmoi reruns it)
+  n1="$(cat "$h/.local/state/develop-env/retry/20-fish-plugins")"
+  [ -n "$n1" ]
   grep -qx '# retry: ' "$SB/script.sh"
-  mkdir -p "$SB_HOME/.local/state/develop-env/retry"; : > "$SB_HOME/.local/state/develop-env/retry/20-fish-plugins"
+  mkdir -p "$SB_HOME/.local/state/develop-env/retry"; printf '%s\n' "$n1" > "$SB_HOME/.local/state/develop-env/retry/20-fish-plugins"
   chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/run_onchange_after_20-fish-plugins.sh.tmpl" > "$SB/again.sh"
-  grep -qx '# retry: retry' "$SB/again.sh"
-  # fish missing altogether: also a retry
-  rm -f "$h/.local/state/develop-env/retry/20-fish-plugins" "$h/stub/fish"
+  grep -qxF "# retry: $n1" "$SB/again.sh"
+  # fish missing altogether: also a retry, with a new nonce
+  rm -f "$h/stub/fish"
   run env -i HOME="$h" PATH="$h/stub:/usr/bin:/bin" sh "$SB/script.sh"
   [ "$status" -eq 0 ]
-  [ -e "$h/.local/state/develop-env/retry/20-fish-plugins" ]
+  n2="$(cat "$h/.local/state/develop-env/retry/20-fish-plugins")"
+  [ -n "$n2" ] && [ "$n2" != "$n1" ]
   # success removes it
   printf '#!/bin/sh\nexit 0\n' > "$h/stub/fish"; chmod +x "$h/stub/fish"
   run env -i HOME="$h" PATH="$h/stub:/usr/bin:/bin" sh "$SB/script.sh"

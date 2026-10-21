@@ -4,13 +4,13 @@
 # Reruns when the plugin list or this script changes.
 # fish_plugins: {{ include "dot_config/fish/fish_plugins" | sha256sum }}
 # Never aborts apply: failures print a warning and exit 0. A failure (fish not
-# installed yet, or a download error) leaves a retry marker, so the next apply
-# reruns this script; success removes it. (chezmoi keys run_onchange_ by name,
+# installed yet, or a download error) leaves a retry marker with a fresh nonce,
+# so the next apply reruns this script after every failure; success removes it. (chezmoi keys run_onchange_ by name,
 # so the apply after the one that removed the marker runs it once more: harmless.)
 {{- if eq .chezmoi.os "darwin" }}
 # brew: {{ if stat "/opt/homebrew/bin/brew" }}present{{ else }}{{ if stat "/usr/local/bin/brew" }}present{{ else }}absent{{ end }}{{ end }}
 {{- end }}
-# retry: {{ if stat (joinPath .chezmoi.homeDir ".local/state/develop-env/retry/20-fish-plugins") }}retry{{ end }}
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "20-fish-plugins") }}
 PATH="$HOME/.local/bin:$PATH"
 {{- if eq .chezmoi.os "darwin" }}
 PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew fish/tmux (12-mac-cli-tools)
@@ -18,8 +18,8 @@ PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # Homebrew fish
 export PATH
 
 warn() { echo "warning: $*" >&2; }
-RETRY="$HOME/.local/state/develop-env/retry/20-fish-plugins"
-retry() { warn "$*"; mkdir -p "${RETRY%/*}" && : > "$RETRY"; exit 0; }
+{{ template "retry-sh" "20-fish-plugins" }}
+retry() { warn "$*"; retry_mark; exit 0; }
 
 if ! command -v fish >/dev/null 2>&1; then
     retry "fish is not installed yet; skipping fisher and tide setup (bin/update retries)"
@@ -41,6 +41,6 @@ fish -c 'tide configure --auto --style=Classic --prompt_colors="True color" \
     --prompt_connection=Disconnected --prompt_connection_andor_frame_color=Dark \
     --prompt_spacing=Compact --show_time=No --icons="Many icons" --transient=Yes' \
     || retry "tide configure failed (bin/update retries)"
-rm -f "$RETRY"
+retry_clear
 exit 0
 {{- end }}

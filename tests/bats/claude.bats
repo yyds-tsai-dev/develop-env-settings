@@ -114,11 +114,16 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   stub codebase-memory-mcp "echo 'codebase-memory-mcp $(lock codebase-memory-mcp)'"
   run_script "$f"
   [ "$status" -eq 0 ]
-  [ -e "$m" ]
+  n1="$(cat "$m")"; [ -n "$n1" ]
   [[ "$output" == *"bin/update"* ]]
-  # the next render differs, so chezmoi reruns the script
+  # the next render shows the nonce, so chezmoi reruns the script
   HOME="$SB_HOME" chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/$SCRIPT" > "$SB/again.sh"
-  grep -q '^# retry: retry$' "$SB/again.sh"
+  grep -qxF "# retry: $n1" "$SB/again.sh"
+  # a second failure writes a new nonce, so the render changes again
+  run_script "$SB/again.sh"
+  n2="$(cat "$m")"; [ -n "$n2" ] && [ "$n2" != "$n1" ]
+  HOME="$SB_HOME" chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiscripts/$SCRIPT" > "$SB/again.sh"
+  grep -qxF "# retry: $n2" "$SB/again.sh"
   # a clean run (everything present) removes the marker
   fake_claude
   for p in $(manifest_plugins); do printf '  {\n    "id": "%s"\n  },\n' "$p"; done > "$SB/plugins.json"
@@ -307,11 +312,11 @@ EOF
   printf 'semble: uvx - \342\234\230 Failed to connect\ncodebase-memory-mcp: codebase-memory-mcp  - \342\234\224 Connected\ndrawio: npx - \342\234\224 Connected\n' > "$SB/mcplist"
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
-  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not connecting: semble"* ]]
+  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not connecting: semble"*": run chezmoi state delete-bucket --bucket=entryState && $REPO_ROOT/bin/update"* ]]
   # an unregistered one FAILs
   grep -v '^drawio:' "$SB/mcplist" > "$SB/m2"; mv "$SB/m2" "$SB/mcplist"
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"not registered: drawio"* ]]
+  [[ "$output" == *"not registered: drawio: run $REPO_ROOT/bin/update (or re-run bootstrap)"* ]]
 }
 
 # bats test_tags=docker

@@ -8,25 +8,25 @@
 # and `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks
 # the login). Warns and exits 0 on any failure; never aborts apply.
 # Any warning (a download, an install, a prerequisite not there yet) leaves a
-# retry marker, so the next apply (bin/update) reruns this script; a clean run
-# removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
+# retry marker holding a fresh nonce, so the next apply (bin/update) reruns this
+# script after every failed run; a clean run removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
 # that removed the marker runs it once more: harmless, every step is idempotent.)
-# retry: {{ if stat (joinPath .chezmoi.homeDir ".local/state/develop-env/retry/50-claude") }}retry{{ end }}
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
 # Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 cd "$HOME" || exit 0
 
-RETRY="$HOME/.local/state/develop-env/retry/50-claude"
+{{ template "retry-sh" "50-claude" }}
 FAILED=
 warn() { echo "warning: $*" >&2; FAILED=1; }
 # done_or_retry: record the outcome for the next apply, then exit 0.
 done_or_retry() {
     if [ -n "$FAILED" ]; then
-        mkdir -p "${RETRY%/*}" && : > "$RETRY"
+        retry_mark
         echo "warning: 50-claude had failures; bin/update (or re-running bootstrap) retries it" >&2
     else
-        rm -f "$RETRY"
+        retry_clear
     fi
     exit 0
 }

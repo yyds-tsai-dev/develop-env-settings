@@ -29,7 +29,7 @@ check_cli_tools_linked() {
     [ -x "$HOME/.local/bin/$b" ] || missing="$missing $b"
   done
   [ -z "$missing" ] && return 0
-  echo "not in ~/.local/bin:$missing: $DOCTOR_FIX"; return 1
+  echo "not in ~/.local/bin:$missing: $DOCTOR_FORCE"; return 1
 }
 register check_cli_tools_linked
 

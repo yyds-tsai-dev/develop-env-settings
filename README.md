@@ -62,7 +62,7 @@ Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare
 
 ### Retrying installs
 
-The install scripts never abort apply. When one fails (a download, or a prerequisite such as Homebrew or fish not there yet) it warns, and Doctor prints the command to run: `bin/update`, or re-run Bootstrap. A failed script leaves a marker in `~/.local/state/develop-env/retry/`, and the macOS scripts watch for Homebrew, so the next apply reruns exactly those scripts. To force every install script to run again:
+The install scripts never abort apply. When one fails (a download, an install, or a prerequisite such as Homebrew or fish not there yet) it warns, and Doctor prints the command to run: `bin/update`, or re-run Bootstrap (Windows: the `irm ... | iex` one-liner). A failed script writes a fresh nonce into its marker in `~/.local/state/develop-env/retry/` and shows that nonce in its `# retry:` line, so every apply after a failure reruns exactly those scripts, however many times in a row they fail; a clean run deletes the marker (the apply after it runs the script once more, harmlessly). The macOS scripts also watch for Homebrew. Apply never reruns a script that succeeded, so when something it installed is removed or broken later, Doctor's hint says to force every install script to run again:
 
 ```sh
 chezmoi state delete-bucket --bucket=entryState    # run_onchange_ install scripts
