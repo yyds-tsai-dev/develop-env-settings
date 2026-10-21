@@ -1,4 +1,5 @@
-{{- if .isServer -}}
+{{- /* Every role off Windows (Windows runs run_onchange_after_60-statusline.ps1). */ -}}
+{{- if ne .chezmoi.os "windows" -}}
 {{- $sl := index .versions "statusline" | default "" -}}
 #!/bin/sh
 # Installs the Claude Code status line binary to ~/.claude/statusline-bin.

@@ -96,3 +96,39 @@ is_windows() { case "$HOST_OS" in MINGW*|MSYS*|CYGWIN*) return 0;; *) return 1;;
   [ "$status" -eq 0 ]
   [[ "$output" == *"PASS chezmoi_present"* ]]
 }
+
+# bootstrap_urls MACHINE [chezmoi]: run bootstrap.sh in the sandbox with uname
+# faking Linux MACHINE and a curl that logs its URL and fails; with "chezmoi",
+# a stub chezmoi is on PATH so the uv download is reached. Echoes the URL log.
+bootstrap_urls() {
+  local stub="$SB/stub"; mkdir -p "$stub"; rm -f "$stub/chezmoi"
+  printf '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo %s ;; *) echo Linux ;; esac\n' "$1" > "$stub/uname"
+  # curl -w (the releases/latest redirect lookup) answers a tag; every download fails
+  printf '#!/bin/sh\nfor a; do case "$a" in https://*) echo "$a" >> "%s/urls" ;; esac; done\ncase " $* " in *" -w "*) printf %%s https://github.com/twpayne/chezmoi/releases/tag/v9.8.7; exit 0 ;; esac\nexit 22\n' "$SB" > "$stub/curl"
+  [ "${2:-}" = chezmoi ] && printf '#!/bin/sh\nexit 0\n' > "$stub/chezmoi"
+  chmod +x "$stub"/*
+  : > "$SB/urls"
+  HOME="$SB_HOME" PATH="$stub:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --source "$REPO_ROOT" --ci >/dev/null 2>&1 || true
+  cat "$SB/urls"
+}
+
+@test "bootstrap downloads the static musl chezmoi and uv builds on Linux" {
+  is_windows && skip "bootstrap.sh is the Linux and macOS path"
+  PATH="/usr/bin:/bin" command -v chezmoi >/dev/null 2>&1 && skip "a system chezmoi would skip the download"
+  PATH="/usr/bin:/bin" command -v uv >/dev/null 2>&1 && skip "a system uv would skip the download"
+  run bootstrap_urls x86_64
+  echo "$output"
+  [ "$output" = "https://github.com/twpayne/chezmoi/releases/latest/download/chezmoi-linux-amd64-musl" ]
+  run bootstrap_urls x86_64 chezmoi
+  echo "$output"
+  [ "$output" = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz" ]
+  run bootstrap_urls aarch64 chezmoi
+  [ "$output" = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-musl.tar.gz" ]
+  # linux-arm64 chezmoi: only the versioned release tarball exists
+  run bootstrap_urls aarch64
+  echo "$output"
+  [ "$output" = "https://github.com/twpayne/chezmoi/releases/latest
+https://github.com/twpayne/chezmoi/releases/download/v9.8.7/chezmoi_9.8.7_linux_arm64.tar.gz" ]
+  ! grep -q 'linux-gnu' "$REPO_ROOT/bootstrap.sh"
+  grep -qF 'cos=linux-musl' "$REPO_ROOT/tests/setup-tools.sh"
+}

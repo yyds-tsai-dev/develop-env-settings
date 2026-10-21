@@ -23,6 +23,10 @@ command = "npx"
 args = ["-y", "@next-ai-drawio/mcp-server@0.4.6"]
 tool_timeout_sec = 120
 
+[mcp_servers.openaiDeveloperDocs]
+url = "https://developers.openai.com/mcp"
+tool_timeout_sec = 60
+
 [[hooks.SessionStart]]
 matcher = "startup|resume|clear|compact"
 

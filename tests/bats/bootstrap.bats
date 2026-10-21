@@ -237,7 +237,8 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
     sh /tmp/x.sh > /tmp/x.log 2>&1; echo \"rerun-rc=\$?\"; cat /tmp/x.log
     chezmoi apply --no-tty >/dev/null 2>&1
     [ \"\$(sha256sum \$c)\" = \"\$s1\" ] && echo CONFIG-STABLE
-    echo \"servers=\$(grep -c '^\[mcp_servers\.[^.]*\]\$' \$c) timeouts=\$(grep -c '^tool_timeout_sec = 120\$' \$c)\"
+    echo \"servers=\$(grep -c '^\[mcp_servers\.[^.]*\]\$' \$c) timeouts=\$(grep -c '^tool_timeout_sec = [0-9][0-9]*\$' \$c)\"
+    sed -n '/^\[mcp_servers\.openaiDeveloperDocs\]\$/,/^\[/p' \$c | grep -qx 'tool_timeout_sec = 60' && echo ODD-TIMEOUT-60
     grep -nE '\"/|/home/' \$c && echo ABSOLUTE-IN-CONFIG
     codex mcp list 2>/dev/null
     for l in ~/.codex/skills/*; do
@@ -256,12 +257,13 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   [[ "$output" == *DIFF-EMPTY* ]]
   [[ "$output" == *"rerun-rc=0"* ]]
   [[ "$output" == *CONFIG-STABLE* ]]
-  [[ "$output" == *"servers=5 timeouts=5"* ]]
+  [[ "$output" == *"servers=6 timeouts=6"* ]]   # every server, the url one included
+  [[ "$output" == *ODD-TIMEOUT-60* ]]
   [[ "$output" != *ABSOLUTE-IN-CONFIG* ]]
   [[ "$output" != *ABSOLUTE-LINK* ]]
   [[ "$output" != *BROKEN-LINK* ]]
   [[ "$output" == *CBM-AGENT-OK* ]]
-  for s in semble codebase-memory-mcp drawio graphify paper-search; do
+  for s in semble codebase-memory-mcp drawio graphify paper-search openaiDeveloperDocs; do
     printf '%s\n' "$output" | grep -qE "^$s +"
   done
   for c in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $c"* ]]; done

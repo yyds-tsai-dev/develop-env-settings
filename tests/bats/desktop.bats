@@ -203,15 +203,28 @@ EOF
   fi
 }
 
-@test "desktop role on darwin ignores server-only files" {
+@test "desktop role on darwin ignores server-only files and manages Claude Code and Codex" {
+  command -v uv >/dev/null 2>&1 || skip "uv needed for the Codex config merge"
   init_desktop
   stub_bw locked
   apply_with "$STUB"
   [ "$status" -eq 0 ]
-  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .claude .config/paper-search-mcp .ssh/authorized_keys; do
+  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .config/paper-search-mcp .ssh/authorized_keys; do
     [ ! -e "$SB_DEST/$p" ] || { echo "server-only $p rendered on a desktop" >&2; false; }
   done
   [ -f "$SB_DEST/.wezterm.lua" ]
+  # Claude Code (not Codex) on every Desktop: the same user files as a Server
+  for p in .claude/CLAUDE.md .claude/settings.json .claude/agents/worker.md .claude/agents/semble-search.md; do
+    [ -s "$SB_DEST/$p" ] || { echo "$p missing on a desktop" >&2; false; }
+  done
+  grep -q '"statusLine"' "$SB_DEST/.claude/settings.json"
+  ! grep -q graphify "$SB_DEST/.claude/CLAUDE.md"   # no graphify skill on a plain Desktop
+  # Codex too: AGENTS.md, generic agents, the vendored skill and the merged config
+  for p in .codex/AGENTS.md .codex/agents/deep-reasoner.toml .codex/agents/fast-worker.toml .codex/skills/codex-queue-workflow/SKILL.md .codex/config.toml; do
+    [ -s "$SB_DEST/$p" ] || { echo "$p missing on a desktop" >&2; false; }
+  done
+  grep -qx '\[mcp_servers.openaiDeveloperDocs\]' "$SB_DEST/.codex/config.toml"
+  grep -qx 'model = "gpt-6-astra"' "$SB_DEST/.codex/config.toml"
 }
 
 @test "server role does not manage wezterm or ~/.ssh/config" {
@@ -312,7 +325,7 @@ EOF
 
 @test "bootstrap.ps1 and the PowerShell doctor files parse" {
   command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
-  for f in bootstrap.ps1 bin/doctor.ps1 doctor.d/*.ps1; do
+  for f in bootstrap.ps1 bin/doctor.ps1 doctor.d/*.ps1 lib/*.ps1; do
     run ps_parse "$REPO_ROOT/$f"
     echo "$f: $output"
     [ "$status" -eq 0 ]
@@ -338,7 +351,9 @@ EOF
 
 @test "doctor: server-only checks SKIP on a desktop role, run on a server role" {
   printf '[user]\n\temail = t@example.invalid\n' > "$SB_HOME/.gitconfig"   # git_user_email is role-independent
-  for c in 10 20 65; do
+  # never the host's claude or codex
+  for t in claude codex; do printf '#!/bin/sh\nexit 1\n' > "$STUB/$t"; chmod +x "$STUB/$t"; done
+  for c in 10 20; do
     DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY="$c-*" run "$REPO_ROOT/bin/doctor" --ci
     echo "$output"
     [ "$status" -eq 0 ]
@@ -346,11 +361,12 @@ EOF
   done
   DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='20-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"SKIP fish_present: server role only (role: desktop)"* ]]
-  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"SKIP codex_installed: server role only"* ]]
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"codex_installed"* ]]   # Codex checks run on every role too
+  [[ "$output" != *"server role only"* ]]
   DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"SKIP claude_mcp: server role only"* ]]
-  [[ "$output" == *"SKIP claude_skills: server role only"* ]]
+  [[ "$output" == *"claude_mcp"* ]]   # Claude Code checks run on every role
+  [[ "$output" != *"server role only"* ]]
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"codex_installed"* ]]
   [[ "$output" != *"server role only"* ]]
@@ -456,6 +472,159 @@ EOF
   [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin\""'* ]]
 }
 
+@test "claude settings call the cbm hooks through cmd.exe and .cmd shims on windows only" {
+  init_desktop
+  t='{{ template "claude-settings.json" (merge (dict "chezmoi" (merge (dict "os" "OS") .chezmoi)) .) }}'
+  run chezmoi_iso execute-template "${t/OS/windows}"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$SB/win.json"
+  # the exact form codebase-memory-mcp's installer writes on Windows (JSON-escaped)
+  for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
+    want="\"command\": \"cmd.exe /d /v:off /s /c '\\\"\\\"%USERPROFILE%\\\\.claude\\\\hooks\\\\$h.cmd\\\"\\\"'\""
+    grep -qF "$want" "$SB/win.json" || { echo "windows hook $h: want $want"; false; }
+  done
+  ! grep -qF '$HOME/.claude/hooks' "$SB/win.json"
+  py="$(command -v python3 || command -v python || true)"
+  [ -z "$py" ] || "$py" -c 'import json,sys; json.load(open(sys.argv[1]))' "$SB/win.json"
+  run chezmoi_iso execute-template "${t/OS/darwin}"
+  [[ "$output" == *'"command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\""'* ]]
+  [[ "$output" != *cmd.exe* ]]
+}
+
+@test "rendered windows Claude and status line scripts parse in PowerShell" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  init_desktop
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+    f="$(render_for windows "$s")"
+    [ -s "$f" ]
+    cp "$f" "$f.ps1"
+    run ps_parse "$f.ps1"
+    echo "$s: $output"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "doctor.ps1 Claude checks on a desktop expect only the MCP servers whose command exists" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub claude is a sh script"
+  mkdir -p "$SB_HOME/.claude/skills/find-skills" "$SB_HOME/.claude/skills/paper-search"
+  : > "$SB_HOME/.claude/skills/find-skills/SKILL.md"; : > "$SB_HOME/.claude/skills/paper-search/SKILL.md"
+  plugins="$(sed -n 's/^ *- { name: "\([^"]*@[^"]*\)".*/\1/p' "$REPO_ROOT/home/.chezmoidata/manifest.yaml")"
+  for p in $plugins; do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
+  printf 'semble: uvx - \342\234\224 Connected\n' > "$SB/mcplist"
+  cat > "$STUB/claude" <<STUBEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "--version "*) echo 9.9.9 ;;
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp list") cat "$SB/mcplist" ;;
+esac
+exit 0
+STUBEOF
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/uvx"
+  chmod +x "$STUB/claude" "$STUB/uvx"
+  # PATH: the stubs and the basic system dirs only (no host npx or codebase-memory-mcp)
+  cat > "$SB/run.ps1" <<PSEOF
+\$env:PATH = '$STUB' + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+foreach (\$c in 'npx', 'codebase-memory-mcp', 'graphify') { if (Get-Command \$c -ErrorAction SilentlyContinue) { "SKIPTEST \$c on PATH"; exit 0 } }
+\$env:HOME = '$SB_HOME'
+& (Join-Path \$PSHOME 'pwsh') -NoProfile -File '$REPO_ROOT/bin/doctor.ps1' -Ci   # the running pwsh: PATH above has no pwsh dir
+exit \$LASTEXITCODE
+PSEOF
+  DEVENV_ROLE=desktop DOCTOR_ONLY='60-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  for c in claude_installed claude_plugins claude_mcp claude_skills; do [[ "$output" == *"PASS $c"* ]]; done
+  [[ "$output" == *"WARN statusline_installed"* ]]
+  [[ "$output" == *"SKIP claude_login"* ]]
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/npx"; chmod +x "$STUB/npx"
+  sed -i.bak '/SKIPTEST/d' "$SB/run.ps1"
+  DEVENV_ROLE=desktop DOCTOR_ONLY='60-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not registered: drawio"* ]]
+}
+
+@test "windows install script runs under PowerShell: npx shim via cmd /c, uvx pre-warmed, no marker" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub claude is a sh script"
+  init_desktop
+  f="$(render_for windows run_onchange_after_50-claude.ps1.tmpl)"; cp "$f" "$SB/claude.ps1"
+  : > "$SB/calls"
+  cat > "$STUB/claude" <<STUBEOF
+#!/bin/sh
+echo "\$*" >> "$SB/calls"
+case "\$1 \$2" in
+  "--version "*) echo "9.9.9 (Claude Code)" ;;
+  "mcp get") exit 1 ;;
+  "plugin list"|"plugin marketplace") echo '[]' ;;
+esac
+exit 0
+STUBEOF
+  printf '#!/bin/sh\necho "uvx $*" >> "%s/calls"\nexit 0\n' "$SB" > "$STUB/uvx"
+  printf '#!/bin/sh\necho "codebase-memory-mcp %s"\n' "$(sed -n "s/^  codebase-memory-mcp: *//p" "$REPO_ROOT/home/.chezmoidata/versions.yaml")" > "$STUB/codebase-memory-mcp"
+  chmod +x "$STUB/claude" "$STUB/uvx" "$STUB/codebase-memory-mcp"
+  echo 'exit 0' > "$STUB/npx.ps1"   # npm's shim, as on a Windows machine with its own Node
+  printf '#!/bin/sh\necho "cmd $*" >> "%s/calls"\nexit 0\n' "$SB" > "$STUB/cmd"; chmod +x "$STUB/cmd"
+  # offline: skills come from a stub web request; paths arrive through the environment
+  cat > "$SB/run.ps1" <<'PSEOF'
+$env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+if (Get-Command graphify -ErrorAction SilentlyContinue) { 'SKIPTEST graphify on PATH'; exit 0 }
+function Invoke-WebRequest { param([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) Set-Content -Path $OutFile -Value "skill from $Uri" }
+& $env:T_SCRIPT
+exit $LASTEXITCODE
+PSEOF
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$SB/claude.ps1" run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"; cat "$SB/calls"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  grep -qx "uvx --python 3.12 --from semble\[mcp\]==$(sed -n "s/^  mcp-semble: *//p" "$REPO_ROOT/home/.chezmoidata/versions.yaml") semble --help" "$SB/calls"
+  grep -q '^mcp add -s user semble -- uvx --python 3.12 ' "$SB/calls"
+  grep -qx 'mcp add -s user codebase-memory-mcp -- codebase-memory-mcp' "$SB/calls"
+  grep -q '^mcp add -s user drawio -- cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls"
+  # drawio started once through cmd /c with an empty stdin, before it is registered
+  [ "$(grep -n '^cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user drawio' "$SB/calls" | cut -d: -f1)" ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  [ -s "$SB_HOME/.claude/settings.json" ]
+}
+
+@test "doctor.ps1 Codex checks on a desktop expect only the servers and skills present there" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub codex is a sh script"
+  m="$REPO_ROOT/home/.chezmoidata/manifest.yaml"
+  c="$SB_HOME/.codex"; mkdir -p "$c/skills" "$c/skill-bundles"
+  printf '[mcp_servers.semble]\ncommand = "uvx"\ntool_timeout_sec = 120\n\n[mcp_servers.openaiDeveloperDocs]\nurl = "https://developers.openai.com/mcp"\ntool_timeout_sec = 60\n' > "$c/config.toml"
+  st="$c/skill-bundles/.devenv-skills"; : > "$st"
+  for b in $(sed -n 's/^    - { name: \(codex-bundle-[^,]*\),.*/\1/p' "$m"); do echo "bundle $b $b-1" >> "$st"; done
+  for d in codex-queue-workflow find-skills paper-search; do
+    mkdir -p "$c/skills/$d"; : > "$c/skills/$d/SKILL.md"
+    [ "$d" = codex-queue-workflow ] || echo "skill $d" >> "$st"
+  done
+  printf '#!/bin/sh\ncase "$1 $2" in\n  "--version "*) echo codex-cli 9 ;;\n  "login status") exit 1 ;;\nesac\nexit 0\n' > "$STUB/codex"
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/uvx"
+  chmod +x "$STUB/codex" "$STUB/uvx"
+  cat > "$SB/run.ps1" <<'PSEOF'
+$env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+foreach ($c in 'npx', 'codebase-memory-mcp', 'graphify-mcp', 'paper-search-mcp') { if (Get-Command $c -ErrorAction SilentlyContinue) { "SKIPTEST $c on PATH"; exit 0 } }
+& (Join-Path $PSHOME 'pwsh') -NoProfile -File $env:T_SCRIPT -Ci
+exit $LASTEXITCODE
+PSEOF
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$REPO_ROOT/bin/doctor.ps1" DEVENV_ROLE=desktop DOCTOR_ONLY='65-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  for k in codex_installed codex_mcp codex_skills; do [[ "$output" == *"PASS $k"* ]]; done
+  [[ "$output" == *"SKIP codex_login"* ]]
+  # with npx present, drawio is expected too
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/npx"; chmod +x "$STUB/npx"
+  sed -i.bak '/SKIPTEST/d' "$SB/run.ps1"
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$REPO_ROOT/bin/doctor.ps1" DEVENV_ROLE=desktop DOCTOR_ONLY='65-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL codex_mcp: MCP server(s) missing from config.toml: drawio"* ]]
+}
+
 @test "mac scripts carry a Homebrew marker so installing Homebrew reruns them" {
   init_desktop "desktop+server"
   if [ -x /opt/homebrew/bin/brew ] || [ -x /usr/local/bin/brew ]; then want=present; else want=absent; fi
@@ -522,14 +691,17 @@ EOF
   [[ "$output" == *"SKIP paper_search_env: server role only"* ]]
 }
 
-@test "doctor: plain desktop SKIPs every Claude check; server role WARNs on a missing status line" {
-  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor"
+@test "doctor: plain desktop runs every Claude check; every role WARNs on a missing status line" {
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/claude"; chmod +x "$STUB/claude"   # never the host's claude
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
-  [ "$status" -eq 0 ]
   for c in claude_installed claude_plugins claude_mcp claude_skills statusline_installed claude_login; do
-    [[ "$output" == *"SKIP $c: server role only"* ]]
+    [[ "$output" == *" $c"* ]]
+    [[ "$output" != *"$c: server role only"* ]]
   done
-  DEVENV_ROLE=server HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"WARN statusline_installed:"*"release download failed"* ]]
+  [[ "$output" == *"SKIP claude_login: login check skipped in --ci"* ]]
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [[ "$output" == *"WARN statusline_installed:"*"release download failed"*"bin/update"* ]]
   [[ "$output" != *"no statusline release locked"* ]]

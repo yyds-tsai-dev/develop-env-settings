@@ -51,3 +51,14 @@ setup() {
   [ "${lines[0]}" = "::error title=macOS bootstrap::not ok doctor FAIL b%3A broken" ] || [ "${lines[0]}" = "::error title=macOS bootstrap::not ok doctor FAIL b: broken" ]
   [[ "${lines[1]}" == *"not ok bootstrap output (last 15 lines)%0A# line 1%0A# line 2%0A# line 3" ]]
 }
+
+@test "bootstrap annotations include the install script warnings" {
+  cd "$BATS_TEST_TMPDIR"
+  : > doctor.out
+  printf 'ok\n\033[33;1mWARNING: could not fetch obra/superpowers at v1\033[0m\nwarning: codex install failed\nok\n' > bootstrap.out
+  run "$BATS_TEST_DIRNAME/../ci-annotate-bootstrap.sh" "Windows bootstrap"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not ok install script warnings (last 40)%0A# WARNING%3A could not fetch obra/superpowers at v1%0A# warning%3A codex install failed"* ]] \
+    || [[ "$output" == *"not ok install script warnings (last 40)%0A# WARNING: could not fetch obra/superpowers at v1%0A# warning: codex install failed"* ]]
+}

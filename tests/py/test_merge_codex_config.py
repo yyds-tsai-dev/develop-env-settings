@@ -42,6 +42,18 @@ def test_mcp_servers_replaced_wholesale():
     assert load(mcc.merge(old, MANAGED))["mcp_servers"]["semble"] == m["mcp_servers"]["semble"]
 
 
+def test_url_server_kept_through_merge_and_safety_check():
+    # a remote (URL) server: `url`, no command/args, its own tool_timeout_sec
+    out = load(mcc.merge(LIVE, MANAGED))
+    assert out["mcp_servers"]["openaiDeveloperDocs"] == {
+        "url": "https://developers.openai.com/mcp",
+        "tool_timeout_sec": 60,
+    }
+    # idempotent: merging into the merged file passes the check and changes nothing
+    once = mcc.merge(LIVE, MANAGED)
+    assert mcc.merge(once, MANAGED) == once
+
+
 def test_unknown_top_level_key_preserved():
     out = load(mcc.merge(LIVE, MANAGED))
     assert out["service_tier"] == "default"
@@ -167,3 +179,97 @@ def test_one_pass_fixpoint_for_hook_tables():
         got = load(once)
         if "PreToolUse" in src:
             assert got["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "x"
+
+
+# --desktop, --fragment-b64, --current-file, --keep-on-error
+
+def test_desktop_drops_missing_commands_keeps_url_servers(capsys):
+    have = {"uvx": "/x/uvx", "codebase-memory-mcp": "/x/codebase-memory-mcp"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert set(out["mcp_servers"]) == {"semble", "codebase-memory-mcp", "openaiDeveloperDocs"}
+    assert out["mcp_servers"]["openaiDeveloperDocs"]["tool_timeout_sec"] == 60
+    assert all("tool_timeout_sec" in s for s in out["mcp_servers"].values())
+    err = capsys.readouterr().err
+    assert err.count("skipping Codex MCP server drawio") == 1
+    # the result still merges and passes the safety check
+    mcc.merge(LIVE, mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+
+
+def test_desktop_windows_shim_runs_through_cmd():
+    have = {"uvx": r"C:\u\uvx.EXE", "codebase-memory-mcp": r"C:\u\codebase-memory-mcp.exe", "npx": r"C:\n\npx.CMD"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=True))
+    d = out["mcp_servers"]["drawio"]
+    assert d["command"] == "cmd"
+    assert d["args"] == ["/c", "npx", "-y", "@next-ai-drawio/mcp-server@0.4.6"]
+    assert out["mcp_servers"]["semble"]["command"] == "uvx"   # a real .exe stays bare
+
+
+def test_main_b64_current_file_desktop(tmp_path, monkeypatch, capsys):
+    import base64
+    cur = tmp_path / "config.toml"
+    cur.write_bytes(LIVE.encode("utf-8"))
+    monkeypatch.setattr(mcc.shutil, "which", lambda c: None)
+    b64 = base64.b64encode(MANAGED.encode("utf-8")).decode()
+    assert mcc.main(["m", "--desktop", "--keep-on-error", "--fragment-b64", b64, "--current-file", str(cur)]) == 0
+    out = load(capsys.readouterr().out)
+    assert set(out["mcp_servers"]) == {"openaiDeveloperDocs"}
+    assert out["projects"] == load(LIVE)["projects"]
+    # a missing current file is an empty config
+    assert mcc.main(["m", "--fragment-b64", b64, "--current-file", str(tmp_path / "none.toml")]) == 0
+    assert load(capsys.readouterr().out)["model"] == load(MANAGED)["model"]
+
+
+def test_keep_on_error_prints_current_unchanged(tmp_path, capsys):
+    import base64
+    cur = tmp_path / "config.toml"
+    cur.write_bytes(LIVE.encode("utf-8"))
+    bad = base64.b64encode(b"[mcp_servers.x]\ncommand = \"y\"\n").decode()   # no tool_timeout_sec
+    assert mcc.main(["m", "--keep-on-error", "--fragment-b64", bad, "--current-file", str(cur)]) == 0
+    cap = capsys.readouterr()
+    assert cap.out == LIVE
+    assert "left unchanged" in cap.err
+
+
+def test_bom_crlf_current_file_merges(tmp_path, capsys):
+    import base64
+    cur = tmp_path / "config.toml"
+    cur.write_bytes(b"\xef\xbb\xbf" + LIVE.replace("\n", "\r\n").encode("utf-8"))
+    b64 = base64.b64encode(b"\xef\xbb\xbf" + MANAGED.encode("utf-8")).decode()
+    assert mcc.main(["m", "--keep-on-error", "--fragment-b64", b64, "--current-file", str(cur)]) == 0
+    cap = capsys.readouterr()
+    assert "failed" not in cap.err
+    out = load(cap.out)
+    assert out["projects"] == load(LIVE)["projects"]
+    assert out["mcp_servers"] == load(MANAGED)["mcp_servers"]
+    assert not cap.out.startswith("\ufeff")
+
+
+def test_keep_on_error_returns_the_original_bytes(tmp_path, capsysbinary):
+    import base64
+    cur = tmp_path / "config.toml"
+    original = b"\xef\xbb\xbfmodel = \"x\"\r\n"
+    cur.write_bytes(original)
+    bad = base64.b64encode(b"[mcp_servers.x]\ncommand = \"y\"\n").decode()
+    assert mcc.main(["m", "--keep-on-error", "--fragment-b64", bad, "--current-file", str(cur)]) == 0
+    assert capsysbinary.readouterr().out == original
+
+
+def test_desktop_drops_hooks_whose_command_is_missing(capsys):
+    have = {"uvx": "/x/uvx"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert "hooks" not in out or not any(
+        "codebase-memory-mcp" in h["command"] for ev in out["hooks"].values() for g in ev for h in g["hooks"])
+    assert "skipping Codex hook SessionStart" in capsys.readouterr().err
+    # with codebase-memory-mcp present the hooks stay
+    have["codebase-memory-mcp"] = "/x/codebase-memory-mcp"
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert [h["command"] for g in out["hooks"]["SessionStart"] for h in g["hooks"]] == ["codebase-memory-mcp hook-augment"]
+    # and the dropped form still merges and passes the check
+    mcc.merge(LIVE, mcc.desktop_servers(MANAGED, which={"uvx": "/x/uvx"}.get, windows=False))
+
+
+def test_desktop_windows_non_exe_runs_through_cmd():
+    have = {"uvx": r"C:\u\uvx.exe", "codebase-memory-mcp": r"C:\u\codebase-memory-mcp.exe", "npx": r"C:\n\npx.COM"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=True))
+    assert out["mcp_servers"]["drawio"]["command"] == "cmd"
+    assert out["mcp_servers"]["semble"]["command"] == "uvx"

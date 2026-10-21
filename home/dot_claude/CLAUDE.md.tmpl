@@ -6,11 +6,11 @@
 - For "PT", interpret it as America/Los_Angeles and account for daylight saving time for the relevant date; do not use a fixed offset.
 - When the current local date or time matters, do not infer it from conversation timestamps. Verify it with:
   `TZ=Asia/Taipei date '+%Y-%m-%d %H:%M:%S %Z (%z)'`
-
+{{ if .isServer }}
 ## graphify
 - **graphify** (`~/.claude/skills/graphify/SKILL.md`) - any input to knowledge graph. Trigger: `/graphify`
 When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
-
+{{ end }}
 
 <!-- SEMBLE_START -->
 ## Semble Code Search

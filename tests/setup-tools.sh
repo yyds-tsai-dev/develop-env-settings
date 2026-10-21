@@ -32,7 +32,9 @@ if [ ! -x "$TOOLS/bin/chezmoi$exe" ]; then
   tag="$(gh_latest_tag twpayne/chezmoi)"
   ver="${tag#v}"
   tmp="$(mktemp -d)"
-  url="https://github.com/twpayne/chezmoi/releases/download/$tag/chezmoi_${ver}_${os}_${arch}.$ext"
+  # Linux amd64: the static musl build (the stock one needs glibc >= 2.32).
+  cos="$os"; [ "$os-$arch" = linux-amd64 ] && cos=linux-musl
+  url="https://github.com/twpayne/chezmoi/releases/download/$tag/chezmoi_${ver}_${cos}_${arch}.$ext"
   curl -fsSL "$url" -o "$tmp/chezmoi.$ext"
   if [ "$ext" = zip ]; then
     mkdir -p "$tmp/x"

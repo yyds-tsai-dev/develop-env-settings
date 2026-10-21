@@ -70,7 +70,13 @@ jobs:
 
   # Real Bootstraps on hosted runners; each must end with Doctor reporting no
   # FAIL (WARN allowed). Failures become ::error annotations (tests/ci-annotate.sh).
+  # Both macOS roles: a plain Desktop (Claude Code, no Codex or Server tools)
+  # and Desktop + Server.
   macos-bootstrap:
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [desktop, desktop+server]
     runs-on: macos-latest
     timeout-minutes: 75
     defaults:
@@ -81,16 +87,16 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: bootstrap desktop+server, then doctor --ci
+      - name: bootstrap ${{ matrix.role }}, then doctor --ci
         run: |
           set -o pipefail
           rc=0
-          sh bootstrap.sh --source "$GITHUB_WORKSPACE" --role desktop+server --ci 2>&1 | tee bootstrap.out || rc=$?
+          sh bootstrap.sh --source "$GITHUB_WORKSPACE" --role "${{ matrix.role }}" --ci 2>&1 | tee bootstrap.out || rc=$?
           PATH="$HOME/.local/bin:$PATH" bin/doctor --ci 2>&1 | tee doctor.out || rc=$?
           exit "$rc"
       - name: annotate failures
         if: failure()
-        run: tests/ci-annotate-bootstrap.sh "macOS bootstrap"
+        run: tests/ci-annotate-bootstrap.sh "macOS bootstrap (${{ matrix.role }})"
 
   windows-bootstrap:
     runs-on: windows-latest
@@ -104,6 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # Windows PowerShell, as the irm | iex one-liner runs; -File so the exit status propagates.
+      # Doctor includes the Claude Code and Codex checks (logins SKIP in -Ci).
       - name: bootstrap desktop, then doctor.ps1 -Ci
         run: |
           set -o pipefail
