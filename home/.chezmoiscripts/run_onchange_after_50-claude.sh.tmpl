@@ -9,9 +9,13 @@ Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
 # versions, then re-applies ~/.claude/settings.json because the cbm installer
 # and `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks
 # the login). Warns and exits 0 on any failure; never aborts apply.
+{{- if not .isServer }}
 # A plain Desktop registers only the MCP servers whose command exists there and
 # installs an installer-made skill only when its installer exists; each one it
-# skips prints one warning and is not a failure (no retry marker).
+# skips prints one warning and is not a failure (no retry marker). A uvx server
+# is run once with --help first (no uv tools here), so the first health check
+# finds uv's cache warm.
+{{- end }}
 # Any warning (a download, an install, a prerequisite not there yet) leaves a
 # retry marker holding a fresh nonce, so the next apply (bin/update) reruns this
 # script after every failed run; a clean run removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
@@ -28,6 +32,13 @@ warn() { echo "warning: $*" >&2; FAILED=1; }
 {{- if not .isServer }}
 # skipped: a desktop lacks this runtime; not a failure.
 skipped() { echo "warning: $*" >&2; }
+# prewarm COMMAND [ARG]...: run the server command once with --help (15 min
+# cap where `timeout` exists) so uv fetches Python and the package now.
+prewarm() {
+    if command -v timeout >/dev/null 2>&1; then timeout 900 "$@" --help >/dev/null 2>&1
+    else "$@" --help >/dev/null 2>&1; fi \
+        || warn "could not pre-fetch the MCP server command: $*"
+}
 {{- end }}
 # done_or_retry: record the outcome for the next apply, then exit 0.
 done_or_retry() {
@@ -143,13 +154,17 @@ if [ -n "$CLAUDE_OK" ]; then
 {{- range .mcp }}
 {{- if has "claude" .clients }}
 {{- $v := index $.versions .name }}
+{{- $cl := .command | squote }}
+{{- range .args }}{{ $cl = printf "%s %s" $cl (ternary (replace "{version}" ($v | toString) .) (. | replace "=={version}" "" | replace "@{version}" "@latest") (not (empty $v)) | squote) }}{{ end }}
 {{- if not $.isServer }}
 if ! command -v {{ .command | squote }} >/dev/null 2>&1; then
     skipped "{{ .command }} not found on this desktop; skipping MCP server {{ trimPrefix "mcp-" .name }}"
 else
+{{- if eq .command "uvx" }}
+prewarm {{ $cl }}
 {{- end }}
-mcp_server {{ trimPrefix "mcp-" .name | squote }} {{ .command | squote }}
-{{- range .args }} {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }}
+{{- end }}
+mcp_server {{ trimPrefix "mcp-" .name | squote }} {{ $cl }}
 {{- if not $.isServer }}
 fi
 {{- end }}

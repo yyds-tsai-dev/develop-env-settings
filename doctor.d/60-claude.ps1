@@ -1,7 +1,8 @@
 # Claude Code checks (PowerShell twin of 60-claude.sh): install, plugins, MCP
 # servers, skills, status line, login. -Ci: login is SKIP. On a plain Desktop
 # only the MCP servers whose command exists and the installer-made skills whose
-# installer exists are expected (50-claude.ps1 skips the others with a warning).
+# installer exists are expected (50-claude.ps1 skips the others with a warning;
+# a .cmd/.ps1 npx is registered as `cmd /c npx`, under the same name).
 
 $script:ClaudeFix = 're-run the bootstrap one-liner (irm https://raw.githubusercontent.com/yyds-tsai-dev/develop-env-settings/main/bootstrap.ps1 | iex)'
 $script:ClaudeForce = "run chezmoi state delete-bucket --bucket=entryState, then $($script:ClaudeFix)"
@@ -36,7 +37,7 @@ function Get-ClaudeMcpNames {
         if ($l -match '^  - name: *(\S+)') { $n = $Matches[1] -replace '^mcp-', ''; $c = '' }
         elseif ($l -match '^    command: *(\S+)') { $c = $Matches[1] }
         elseif ($l -match '^    clients:.*claude') {
-            if ((Test-ClaudeDesktop) -and -not (Get-Command $c -ErrorAction SilentlyContinue)) { continue }
+            if ((Test-ClaudeDesktop) -and (-not $c -or -not (Get-Command $c -ErrorAction SilentlyContinue))) { continue }
             $n
         }
     }
@@ -57,6 +58,7 @@ function Get-ClaudeSkillDirs {
 }
 
 function check_claude_installed {
+    $ErrorActionPreference = 'Continue'   # local: claude's stderr must not become a FAIL (PowerShell 5.1)
     if (-not (Test-ClaudePresent)) { return @{ Status = 'FAIL'; Reason = "claude not on PATH: $($script:ClaudeFix)" } }
     & claude --version *> $null
     if ($LASTEXITCODE -eq 0) { return $null }
@@ -65,6 +67,7 @@ function check_claude_installed {
 Register 'check_claude_installed'
 
 function check_claude_plugins {
+    $ErrorActionPreference = 'Continue'   # local: claude's stderr must not become a FAIL (PowerShell 5.1)
     if (-not (Test-ClaudePresent)) { return @{ Status = 'FAIL'; Reason = "claude not on PATH: $($script:ClaudeFix)" } }
     $list = (& claude plugin list --json 2>$null) -join "`n"
     $missing = @()
@@ -81,6 +84,7 @@ Register 'check_claude_plugins'
 # Every expected server must be registered and connect (`claude mcp list` runs
 # a health check: a check mark and "Connected", or "Failed to connect ...").
 function check_claude_mcp {
+    $ErrorActionPreference = 'Continue'   # local: claude's stderr must not become a FAIL (PowerShell 5.1)
     if (-not (Test-ClaudePresent)) { return @{ Status = 'FAIL'; Reason = "claude not on PATH: $($script:ClaudeFix)" } }
     $list = @(& claude mcp list 2>$null)
     $missing = @(); $failed = @()
@@ -115,6 +119,7 @@ function check_statusline_installed {
 Register 'check_statusline_installed'
 
 function check_claude_login {
+    $ErrorActionPreference = 'Continue'   # local: claude's stderr must not become a FAIL (PowerShell 5.1)
     if ($script:DoctorCi) { return @{ Status = 'SKIP'; Reason = 'login check skipped in -Ci' } }
     if (-not (Test-ClaudePresent)) { return @{ Status = 'FAIL'; Reason = "claude not on PATH: $($script:ClaudeFix)" } }
     & claude auth status *> $null

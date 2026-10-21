@@ -217,6 +217,7 @@ EOF
     [ -s "$SB_DEST/$p" ] || { echo "$p missing on a desktop" >&2; false; }
   done
   grep -q '"statusLine"' "$SB_DEST/.claude/settings.json"
+  ! grep -q graphify "$SB_DEST/.claude/CLAUDE.md"   # no graphify skill on a plain Desktop
 }
 
 @test "server role does not manage wezterm or ~/.ssh/config" {
@@ -534,6 +535,46 @@ PSEOF
   echo "$output"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL claude_mcp: MCP server(s) not registered: drawio"* ]]
+}
+
+@test "windows install script runs under PowerShell: npx shim via cmd /c, uvx pre-warmed, no marker" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub claude is a sh script"
+  init_desktop
+  f="$(render_for windows run_onchange_after_50-claude.ps1.tmpl)"; cp "$f" "$SB/claude.ps1"
+  : > "$SB/calls"
+  cat > "$STUB/claude" <<STUBEOF
+#!/bin/sh
+echo "\$*" >> "$SB/calls"
+case "\$1 \$2" in
+  "--version "*) echo "9.9.9 (Claude Code)" ;;
+  "mcp get") exit 1 ;;
+  "plugin list"|"plugin marketplace") echo '[]' ;;
+esac
+exit 0
+STUBEOF
+  printf '#!/bin/sh\necho "uvx $*" >> "%s/calls"\nexit 0\n' "$SB" > "$STUB/uvx"
+  printf '#!/bin/sh\necho "codebase-memory-mcp %s"\n' "$(sed -n "s/^  codebase-memory-mcp: *//p" "$REPO_ROOT/home/.chezmoidata/versions.yaml")" > "$STUB/codebase-memory-mcp"
+  chmod +x "$STUB/claude" "$STUB/uvx" "$STUB/codebase-memory-mcp"
+  echo 'exit 0' > "$STUB/npx.ps1"   # npm's shim, as on a Windows machine with its own Node
+  # offline: skills come from a stub web request; paths arrive through the environment
+  cat > "$SB/run.ps1" <<'PSEOF'
+$env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+if (Get-Command graphify -ErrorAction SilentlyContinue) { 'SKIPTEST graphify on PATH'; exit 0 }
+function Invoke-WebRequest { param([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) Set-Content -Path $OutFile -Value "skill from $Uri" }
+& $env:T_SCRIPT
+exit $LASTEXITCODE
+PSEOF
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$SB/claude.ps1" run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"; cat "$SB/calls"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  grep -qx "uvx --python 3.12 --from semble\[mcp\]==$(sed -n "s/^  mcp-semble: *//p" "$REPO_ROOT/home/.chezmoidata/versions.yaml") semble --help" "$SB/calls"
+  grep -q '^mcp add -s user semble -- uvx --python 3.12 ' "$SB/calls"
+  grep -qx 'mcp add -s user codebase-memory-mcp -- codebase-memory-mcp' "$SB/calls"
+  grep -q '^mcp add -s user drawio -- cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls"
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  [ -s "$SB_HOME/.claude/settings.json" ]
 }
 
 @test "mac scripts carry a Homebrew marker so installing Homebrew reruns them" {

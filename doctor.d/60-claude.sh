@@ -32,7 +32,7 @@ _claude_desktop() {
 _claude_mcp_names() {
   local n c
   awk '/^[a-z_]+:/ { s = ($1 == "mcp:") }
-       s && /^  - name:/ { n = $3; sub(/^mcp-/, "", n) }
+       s && /^  - name:/ { n = $3; sub(/^mcp-/, "", n); c = "" }
        s && /^    command:/ { c = $2 }
        s && /^    clients:/ && /claude/ { print n, c }' "$(_claude_manifest)" |
   while read -r n c; do

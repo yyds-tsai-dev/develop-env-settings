@@ -12,7 +12,11 @@ of run_onchange_after_50-claude.sh. */ -}}
 # login). Never aborts apply.
 # Only the MCP servers whose command exists here are registered, and an
 # installer-made skill is installed only when its installer exists; each one
-# skipped prints one warning and is not a failure (no retry marker). Any other
+# skipped prints one warning and is not a failure (no retry marker). A server
+# whose command is a .cmd/.ps1 shim (npx from a Node install) is registered as
+# `cmd /c <command> ...`, since Claude Code cannot start a shim directly. A uvx
+# server is run once with --help first (no uv tools here), so the first health
+# check finds uv's cache warm. Any other
 # warning leaves a retry marker with a fresh nonce, so the next apply (re-run
 # the bootstrap one-liner) reruns this after every failed run; a clean run
 # removes it.
@@ -178,14 +182,40 @@ if ($claudeOk) {
         & claude @add *> $null
         if ($LASTEXITCODE -ne 0) { Warn-Step "could not add MCP server $Name" }
     }
+    # Get-McpCommandLine COMMAND [ARG]...: the command line to register; a .cmd,
+    # .bat or .ps1 shim runs through `cmd /c`.
+    function Get-McpCommandLine([string[]]$CommandLine) {
+        $src = (Get-Command $CommandLine[0] -ErrorAction SilentlyContinue).Source
+        if ($src -match '\.(cmd|bat|ps1)$') { return @('cmd', '/c') + $CommandLine }
+        return $CommandLine
+    }
+    # Invoke-Prewarm COMMAND [ARG]...: run the server command once with --help
+    # (15 min cap) so uv fetches Python and the package now.
+    function Invoke-Prewarm([string[]]$CommandLine) {
+        $out = Join-Path ([IO.Path]::GetTempPath()) ('devenv-prewarm-' + [guid]::NewGuid())
+        try {
+            $p = Start-Process -FilePath (Get-Command $CommandLine[0]).Source -NoNewWindow -PassThru `
+                -ArgumentList (@($CommandLine | Select-Object -Skip 1) + '--help') `
+                -RedirectStandardOutput "$out.out" -RedirectStandardError "$out.err"
+            if (-not $p.WaitForExit(900000)) { $p.Kill(); throw 'timed out after 15 minutes' }
+            if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+        } catch {
+            Warn-Step "could not pre-fetch the MCP server command $($CommandLine -join ' '): $_"
+        }
+        Remove-Item -Force -ErrorAction SilentlyContinue "$out.out", "$out.err"
+    }
 {{- range .mcp }}
 {{- if has "claude" .clients }}
 {{- $v := index $.versions .name }}
     if (-not (Test-Cmd {{ .command | squote }})) {
         Skip-Step '{{ .command }} not found on this desktop; skipping MCP server {{ trimPrefix "mcp-" .name }}'
     } else {
-        Set-McpServer {{ trimPrefix "mcp-" .name | squote }} @({{ .command | squote }}
+        $cl = @({{ .command | squote }}
 {{- range .args }}, {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }})
+{{- if eq .command "uvx" }}
+        Invoke-Prewarm $cl
+{{- end }}
+        Set-McpServer {{ trimPrefix "mcp-" .name | squote }} (Get-McpCommandLine $cl)
     }
 {{- end }}
 {{- end }}

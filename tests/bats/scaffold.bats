@@ -103,7 +103,8 @@ is_windows() { case "$HOST_OS" in MINGW*|MSYS*|CYGWIN*) return 0;; *) return 1;;
 bootstrap_urls() {
   local stub="$SB/stub"; mkdir -p "$stub"; rm -f "$stub/chezmoi"
   printf '#!/bin/sh\ncase "$1" in -s) echo Linux ;; -m) echo %s ;; *) echo Linux ;; esac\n' "$1" > "$stub/uname"
-  printf '#!/bin/sh\nfor a; do case "$a" in https://*) echo "$a" >> "%s/urls" ;; esac; done\nexit 22\n' "$SB" > "$stub/curl"
+  # curl -w (the releases/latest redirect lookup) answers a tag; every download fails
+  printf '#!/bin/sh\nfor a; do case "$a" in https://*) echo "$a" >> "%s/urls" ;; esac; done\ncase " $* " in *" -w "*) printf %%s https://github.com/twpayne/chezmoi/releases/tag/v9.8.7; exit 0 ;; esac\nexit 22\n' "$SB" > "$stub/curl"
   [ "${2:-}" = chezmoi ] && printf '#!/bin/sh\nexit 0\n' > "$stub/chezmoi"
   chmod +x "$stub"/*
   : > "$SB/urls"
@@ -123,6 +124,11 @@ bootstrap_urls() {
   [ "$output" = "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-unknown-linux-musl.tar.gz" ]
   run bootstrap_urls aarch64 chezmoi
   [ "$output" = "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-musl.tar.gz" ]
+  # linux-arm64 chezmoi: only the versioned release tarball exists
+  run bootstrap_urls aarch64
+  echo "$output"
+  [ "$output" = "https://github.com/twpayne/chezmoi/releases/latest
+https://github.com/twpayne/chezmoi/releases/download/v9.8.7/chezmoi_9.8.7_linux_arm64.tar.gz" ]
   ! grep -q 'linux-gnu' "$REPO_ROOT/bootstrap.sh"
   grep -qF 'cos=linux-musl' "$REPO_ROOT/tests/setup-tools.sh"
 }

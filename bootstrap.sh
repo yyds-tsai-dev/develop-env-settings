@@ -75,10 +75,12 @@ bootstrap_main() {
 
     # Linux: the static (musl) builds, which run on any glibc (the stock chezmoi
     # linux-amd64 build needs glibc >= 2.32; RHEL/Rocky 8 has 2.28). chezmoi
-    # publishes no musl build for arm64.
+    # publishes linux-arm64 only as the release tarball
+    # chezmoi_<version>_linux_arm64.tar.gz (as its get.chezmoi.io script uses),
+    # so cz=tarball:linux_arm64 fetches that.
     case "$(uname -s)-$(uname -m)" in
         Linux-x86_64)  cz=linux-amd64-musl; uvt=x86_64-unknown-linux-musl ;;
-        Linux-aarch64) cz=linux-arm64;      uvt=aarch64-unknown-linux-musl ;;
+        Linux-aarch64) cz=tarball:linux_arm64; uvt=aarch64-unknown-linux-musl ;;
         Darwin-arm64)  cz=darwin-arm64; uvt=aarch64-apple-darwin ;;
         Darwin-x86_64) cz=darwin-amd64; uvt=x86_64-apple-darwin ;;
         *) echo "error: unsupported platform $(uname -s) $(uname -m)" >&2; return 1 ;;
@@ -86,10 +88,26 @@ bootstrap_main() {
 
     if ! command -v chezmoi >/dev/null 2>&1; then
         echo "installing chezmoi into $bin"
-        curl -fsSL --retry 3 -o "$bin/chezmoi.tmp" \
-            "https://github.com/twpayne/chezmoi/releases/latest/download/chezmoi-$cz" \
-            && chmod 0755 "$bin/chezmoi.tmp" && mv -f "$bin/chezmoi.tmp" "$bin/chezmoi" \
-            || { rm -f "$bin/chezmoi.tmp"; echo "error: chezmoi download failed" >&2; return 1; }
+        case "$cz" in
+            tarball:*)
+                # the latest tag from the releases/latest redirect (no API call)
+                tag="$(curl -fsS -o /dev/null -w '%{redirect_url}' https://github.com/twpayne/chezmoi/releases/latest)"
+                tag="${tag##*/}"
+                tmp="$(mktemp -d)"
+                case "$tag" in
+                    v[0-9]*) curl -fsSL --retry 3 \
+                        "https://github.com/twpayne/chezmoi/releases/download/$tag/chezmoi_${tag#v}_${cz#tarball:}.tar.gz" \
+                        | tar -xzf - -C "$tmp" chezmoi \
+                        && chmod 0755 "$tmp/chezmoi" && mv -f "$tmp/chezmoi" "$bin/chezmoi" ;;
+                    *) false ;;
+                esac || { rm -rf "$tmp"; echo "error: chezmoi download failed" >&2; return 1; }
+                rm -rf "$tmp" ;;
+            *)
+                curl -fsSL --retry 3 -o "$bin/chezmoi.tmp" \
+                    "https://github.com/twpayne/chezmoi/releases/latest/download/chezmoi-$cz" \
+                    && chmod 0755 "$bin/chezmoi.tmp" && mv -f "$bin/chezmoi.tmp" "$bin/chezmoi" \
+                    || { rm -f "$bin/chezmoi.tmp"; echo "error: chezmoi download failed" >&2; return 1; } ;;
+        esac
     fi
     if ! command -v uv >/dev/null 2>&1; then
         echo "installing uv into $bin"

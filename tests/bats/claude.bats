@@ -146,7 +146,10 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   grep -qF -- '-File $inst "--dir=$bin" --skip-config' "$f"
   grep -qF -- 'install -y --skip-binary --clients=claude "--dir=$bin"' "$f"
   grep -qF "\$cbmVersion = '$(lock codebase-memory-mcp)'" "$f"
-  grep -qF "Set-McpServer 'semble' @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble')" "$f"
+  grep -qF "\$cl = @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble')" "$f"
+  grep -qF "Set-McpServer 'semble' (Get-McpCommandLine \$cl)" "$f"
+  [ "$(grep -c '^        Invoke-Prewarm \$cl$' "$f")" -eq 1 ]   # uvx (semble) only
+  grep -qF "if (\$src -match '\.(cmd|bat|ps1)\$') { return @('cmd', '/c') + \$CommandLine }" "$f"
   for c in uvx codebase-memory-mcp npx; do
     grep -qF "if (-not (Test-Cmd '$c')) {" "$f" || { echo "no runtime guard for $c"; false; }
   done
@@ -168,7 +171,7 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   grep -qF "if ! command -v 'npx' >/dev/null 2>&1; then" "$SB/claude.sh"
   fake_claude
   rm -f "$STUB/graphify"          # no uv tools on a plain desktop
-  stub uvx 'exit 0'               # uv comes with Bootstrap; npx is missing here
+  stub uvx "echo \"uvx \$*\" >> '$SB/calls'"   # uv comes with Bootstrap; npx is missing here
   HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
   echo "$output"; cat "$SB/calls"
   [ "$status" -eq 0 ]
@@ -180,6 +183,16 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]   # a skip is not a failure
   for p in $(manifest_plugins); do grep -qx "plugin install $p" "$SB/calls"; done
   json_ok "$SB_HOME/.claude/settings.json"
+  # semble's uvx command was pre-warmed once, before it was registered
+  [ "$(grep -cx "uvx --python 3.12 --from semble\[mcp\]==$(lock mcp-semble) semble --help" "$SB/calls")" -eq 1 ]
+  [ "$(grep -n 'semble --help' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user semble' "$SB/calls" | cut -d: -f1)" ]
+  # a failed pre-warm is a failure: warning and retry marker
+  stub uvx 'exit 1'
+  HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"could not pre-fetch the MCP server command: uvx"* ]]
+  [ -s "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
 }
 
 @test "server install script has no desktop runtime guards" {
@@ -187,6 +200,8 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   f="$(render_script)"
   ! grep -q 'not found on this desktop' "$f"
   ! grep -q 'not installed on this desktop' "$f"
+  ! grep -q 'prewarm' "$f"
+  ! grep -q 'A plain Desktop' "$f"
   grep -qF 'warn "graphify missing; skipping the graphify skill"' "$f"
 }
 

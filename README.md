@@ -23,7 +23,7 @@ Bootstrap installs chezmoi and uv into `~/.local/bin`, resolves the Version lock
 | Role | OS | Gets |
 |---|---|---|
 | `server` | Linux x86_64 | Full environment under userland paths |
-| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, Claude Code (same user files, plugins, skills and status line as a Server; MCP servers whose runtime is missing are skipped with a warning). No Codex |
+| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, Claude Code (same user files, plugins, skills and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists). No Codex |
 | `desktop+server` | macOS | Both, Server tools through Homebrew; zsh (`~/.zshrc` block) starts fish |
 
 A Windows Server use goes through WSL2 with role `server`.
