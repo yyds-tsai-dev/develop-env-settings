@@ -1,6 +1,7 @@
 {{- /* Managed part of ~/.codex/config.toml, merged in by lib/merge_codex_config.py
        (modify_private_config.toml.tmpl). MCP servers come from the Manifest at
-       locked versions with bare commands; every server carries tool_timeout_sec.
+       locked versions with bare commands, or a `url` for a remote server; every
+       server carries tool_timeout_sec (the entry's tool_timeout_sec, default 120).
        Everything not listed here (projects, hooks.state, ...) stays machine-local. */ -}}
 # Unmanaged, kept machine-local: marketplaces.openai-bundled, plugins."visualize@openai-bundled", [projects.*], hooks.state.
 model = "gpt-6-astra"
@@ -12,20 +13,24 @@ approvals_reviewer = "user"
 {{- if has "codex" .clients }}
 {{- $v := index $.versions .name }}
 {{- $args := list }}
-{{- range .args }}
+{{- range (index . "args" | default list) }}
 {{- if $v }}{{ $args = append $args (replace "{version}" $v .) }}{{ else }}{{ $args = append $args (. | replace "=={version}" "" | replace "@{version}" "@latest") }}{{ end }}
 {{- end }}
 {{- $n := trimPrefix "mcp-" .name }}
 
 [mcp_servers.{{ $n }}]
+{{- if index . "url" }}
+url = {{ .url | toJson }}
+{{- else }}
 command = {{ .command | toJson }}
 {{- if $args }}
 args = {{ $args | toJson }}
 {{- end }}
+{{- end }}
 {{- if index . "codex_env_vars" }}
 env_vars = {{ .codex_env_vars | toJson }}
 {{- end }}
-tool_timeout_sec = 120
+tool_timeout_sec = {{ index . "tool_timeout_sec" | default 120 }}
 {{- range (index . "codex_approve_tools" | default list) }}
 
 [mcp_servers.{{ $n }}.tools.{{ . }}]

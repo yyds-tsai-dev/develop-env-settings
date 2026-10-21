@@ -25,7 +25,7 @@ Stop and ask; do not attempt these yourself.
 
 - Bitwarden: `bw login`, then `export BW_SESSION=$(bw unlock --raw)`, then `bw sync`, then apply again. The first apply on a new machine always skips the Secret files because `bw` is installed only during that apply.
 - GitHub SSH key: paste the public key Bootstrap printed at https://github.com/settings/ssh/new.
-- Log in to Claude Code (`claude`) and Codex (`codex login`) on server roles (a plain Desktop gets neither).
+- Log in to Claude Code (`claude`) on every role, and to Codex (`codex login`) on server roles (a plain Desktop gets Claude Code but no Codex).
 - Any admin-rights commands Bootstrap printed (system packages, Homebrew's first install, elevated winget).
 
 ## Done

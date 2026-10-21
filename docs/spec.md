@@ -18,9 +18,11 @@ Out: project toolchains and secrets (DREAMPlace, OpenROAD, CUDA, Innovus, projec
 | Role | OS | Gets |
 |---|---|---|
 | Server | Linux x86_64, no admin rights | Full environment, all under userland paths |
-| Desktop | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client + key, Nerd Font, Bitwarden CLI (no Claude Code, Codex or agent tooling) |
+| Desktop | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client + key, Nerd Font, Bitwarden CLI, Claude Code (same user CLAUDE.md, settings, generic agents, plugins, skills and status line as a Server) |
 | Desktop + Server | macOS (opt-in) | Both, Server tools via Homebrew |
 | Server via WSL2 | Windows | Treated as a Linux Server |
+
+Codex stays Server-only: a plain Desktop gets no Codex, `~/.codex` or Codex MCP configuration (revised 2026-10-21; Claude Code was Server-only before). Claude Code on a plain Desktop registers only the MCP servers whose command exists there (semble needs `uvx`, which Bootstrap installs everywhere; drawio needs `npx`, present on macOS through fnm and skipped on Windows; codebase-memory-mcp comes from its upstream installer on macOS and Windows) and skips the graphify skill (the graphifyy uv tool is Server-only); each skip prints one warning and is not a failure, and Doctor expects only what was registerable.
 
 Existing homes: the intended use is a new machine where nothing runs yet, so Bootstrap applies by default, including on a home mounted from network storage (NFS), which only the same account's machines see. Before applying it always backs up every file it will change to `~/.dotfiles-backup-<timestamp>`, and when the home is on NFS or the account has processes running longer than 10 minutes (other than shells, tmux, sshd, the VS Code server, Claude Code, Codex and Bootstrap itself) it prints a warning listing them, then continues. Apply only adds and replaces; it never deletes old tools (previous micromamba envs, nvm, tarball Node) — `bin/cleanup` removes those when the person runs it. A home containing `~/.config/develop-env/hold` never gets dotfiles applied; Bootstrap then runs only the machine-local steps (SSH key, `known_hosts`, VS Code server extensions). On a machine whose home already has a working environment, the person reviews `chezmoi diff` before the first apply.
 
@@ -48,9 +50,9 @@ Steps that need admin rights (system packages, Homebrew's first install, elevate
 - **uv**: standalone install; uv tools from the Manifest (semble[mcp], graphifyy[mcp], paper-search-mcp).
 - **git**: identity, LFS filter, global ignore; gh installed; SSH key generated with `ssh-keygen -t ed25519`, public key printed with the link https://github.com/settings/ssh/new, Bootstrap waits and verifies with `ssh -T git@github.com`.
 - **SSH**: committed public keys merged into `authorized_keys` (never overwriting existing lines); private keys never leave a machine. Desktop `~/.ssh/config` and WezTerm SSH domains generated from a Bitwarden item holding host aliases, addresses and usernames.
-- **Claude Code**: native installer; user `CLAUDE.md` (timezone, semble, graphify, advisor, generic Agent orchestration section), `settings.json`, generic agents (deep-reasoner, worker, fast-worker, semble-search, researcher, codebase-memory set), plugins and marketplaces from the Manifest, own skills vendored, third-party skills reinstalled. codebase-memory-mcp kept, installed by its upstream installer which regenerates its hooks.
+- **Claude Code**: native installer; user `CLAUDE.md` (timezone, semble, graphify, advisor, generic Agent orchestration section), `settings.json`, generic agents (deep-reasoner, worker, fast-worker, semble-search, researcher, codebase-memory set), plugins and marketplaces from the Manifest, own skills vendored, third-party skills reinstalled. codebase-memory-mcp kept, installed by its upstream installer which regenerates its hooks (`install.sh --clients=claude` on Linux and macOS; on Windows `install.ps1 --skip-config`, then `codebase-memory-mcp install --clients=claude`, whose hooks are `.cmd` shims run through `cmd.exe`). Every role gets it; Windows through `run_onchange_after_50-claude.ps1`.
 - **Status line**: existing Go program vendored; GitHub Actions publishes linux-amd64, darwin-arm64 and windows-amd64 binaries as releases; install downloads the matching one, building locally only when Go is present.
-- **Codex**: standalone installer; `AGENTS.md`, generic agents (deep-reasoner, fast-worker), own skill `codex-queue-workflow` vendored, skill bundles reinstalled at Version-lock versions.
+- **Codex**: standalone installer; `AGENTS.md`, generic agents (deep-reasoner, fast-worker), own skill `codex-queue-workflow` vendored, skill bundles reinstalled at Version-lock versions. Its MCP servers include one remote server, `openaiDeveloperDocs` (`url = "https://developers.openai.com/mcp"`, `tool_timeout_sec = 60`), declared in the Manifest with a `url` instead of a command; Claude Code does not get it.
 - **VS Code**: Desktop settings via VS Code Settings Sync; `remote.SSH.defaultExtensions` list kept in the repo (applied through Settings Sync) plus a fallback script using the server-side `code --install-extension`. JetBrainsMono Nerd Font installed on Desktops and set for the VS Code terminal.
 - **WezTerm**: font, colour scheme, SSH domains; connecting to a Server attaches `tmux new -As wez` so sessions survive disconnects, separate from any VS Code tmux session.
 
@@ -71,7 +73,7 @@ Items:
 
 ## Verification
 
-GitHub Actions on every push: Ubuntu container as a non-admin user (full Server install + Doctor), macOS runner (Desktop + Server), Windows runner (Desktop); each Bootstrap must end with Doctor reporting no FAIL (WARN allowed). Bitwarden and login steps are skipped in CI.
+GitHub Actions on every push: Ubuntu container as a non-admin user (full Server install + Doctor), macOS runner (Desktop, and Desktop + Server), Windows runner (Desktop, including the Claude Code checks); each Bootstrap must end with Doctor reporting no FAIL (WARN allowed). Bitwarden and login steps are skipped in CI.
 
 ## Delivery
 

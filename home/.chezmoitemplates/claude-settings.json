@@ -6,7 +6,11 @@ extraKnownMarketplaces come from the Manifest; builtin marketplaces are not decl
 The cbm hooks call the wrapper scripts that installer writes to ~/.claude/hooks.
 statusLine appears only once a statusline release is locked or the binary exists
 (a local build), so Claude never runs a missing command.
+On Windows the cbm installer writes .cmd shims and calls them through cmd.exe
+(its cbm_build_claude_hook_command), so the hook commands take that form there.
 */ -}}
+{{- $hook := `"\"$HOME/.claude/hooks/%s\""` }}
+{{- if eq .chezmoi.os "windows" }}{{ $hook = `"cmd.exe /d /v:off /s /c '\"\"%%USERPROFILE%%\\.claude\\hooks\\%s.cmd\"\"'"` }}{{ end -}}
 {
   "model": "opus",
   "hooks": {
@@ -16,7 +20,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\"",
+            "command": {{ printf $hook "cbm-code-discovery-gate" }},
             "timeout": 5
           }
         ]
@@ -28,7 +32,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\"",
+            "command": {{ printf $hook "cbm-code-discovery-gate" }},
             "timeout": 5
           }
         ]
@@ -40,7 +44,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "command": {{ printf $hook "cbm-session-reminder" }},
             "timeout": 5
           }
         ]
@@ -50,7 +54,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "command": {{ printf $hook "cbm-session-reminder" }},
             "timeout": 5
           }
         ]
@@ -60,7 +64,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "command": {{ printf $hook "cbm-session-reminder" }},
             "timeout": 5
           }
         ]
@@ -70,7 +74,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-session-reminder\"",
+            "command": {{ printf $hook "cbm-session-reminder" }},
             "timeout": 5
           }
         ]
@@ -82,7 +86,7 @@ statusLine appears only once a statusline release is locked or the binary exists
         "hooks": [
           {
             "type": "command",
-            "command": "\"$HOME/.claude/hooks/cbm-subagent-reminder\"",
+            "command": {{ printf $hook "cbm-subagent-reminder" }},
             "timeout": 5
           }
         ]

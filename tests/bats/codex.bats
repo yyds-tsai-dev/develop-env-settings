@@ -94,11 +94,17 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
     grep -qx "\[mcp_servers.$s\]" "$f" || { echo "server $s missing"; false; }
     n=$((n + 1))
   done
-  [ "$n" -eq 5 ]
+  [ "$n" -eq 6 ]
   run tool_timeouts "$f"
   echo "$output"
-  [ "${#lines[@]}" -eq 5 ]
+  [ "${#lines[@]}" -eq 6 ]
   [[ "$output" != *MISSING* ]]
+  # the remote (URL) server: url instead of command/args, its own timeout
+  grep -qx 'openaiDeveloperDocs 60' <<<"$output"
+  grep -qx 'semble 120' <<<"$output"
+  sed -n '/^\[mcp_servers.openaiDeveloperDocs\]$/,/^\[/p' "$f" > "$SB/odd"
+  grep -qx 'url = "https://developers.openai.com/mcp"' "$SB/odd"
+  ! grep -qE '^(command|args) =' "$SB/odd"
   grep -qF "\"semble[mcp]==$(lock mcp-semble)\"" "$f"
   grep -qF '"--python","3.12"' "$f"
   grep -qF "\"@next-ai-drawio/mcp-server@$(lock mcp-drawio)\"" "$f"

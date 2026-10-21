@@ -42,6 +42,18 @@ def test_mcp_servers_replaced_wholesale():
     assert load(mcc.merge(old, MANAGED))["mcp_servers"]["semble"] == m["mcp_servers"]["semble"]
 
 
+def test_url_server_kept_through_merge_and_safety_check():
+    # a remote (URL) server: `url`, no command/args, its own tool_timeout_sec
+    out = load(mcc.merge(LIVE, MANAGED))
+    assert out["mcp_servers"]["openaiDeveloperDocs"] == {
+        "url": "https://developers.openai.com/mcp",
+        "tool_timeout_sec": 60,
+    }
+    # idempotent: merging into the merged file passes the check and changes nothing
+    once = mcc.merge(LIVE, MANAGED)
+    assert mcc.merge(once, MANAGED) == once
+
+
 def test_unknown_top_level_key_preserved():
     out = load(mcc.merge(LIVE, MANAGED))
     assert out["service_tier"] == "default"

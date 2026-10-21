@@ -47,6 +47,11 @@ mcp:
     command: paper-search-mcp
     args: []
     clients: [codex]
+  - name: mcp-openaiDeveloperDocs
+    source: none   # a remote server: `url` instead of command/args, nothing to install or lock
+    url: "https://developers.openai.com/mcp"
+    clients: [codex]
+    tool_timeout_sec: 60   # default 120
 claude:
   marketplaces:
     - { name: claude-plugins-official, source: none, repo: anthropics/claude-plugins-official, builtin: true }

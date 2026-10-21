@@ -9,7 +9,7 @@ A Linux machine where development actually happens (code, builds, agents), reach
 _Avoid_: host, box, remote, dev machine
 
 **Desktop**:
-A Windows or macOS machine the person sits at; it carries only the client side (editor, terminal emulator, SSH identity, fonts) unless it also opts into the Server role.
+A Windows or macOS machine the person sits at; it carries the client side (editor, terminal emulator, SSH identity, fonts) plus Claude Code, and gets Codex and the Server tools only when it also opts into the Server role.
 _Avoid_: client, local machine, laptop
 
 **Shared home**:

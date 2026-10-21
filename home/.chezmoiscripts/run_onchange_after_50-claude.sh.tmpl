@@ -1,4 +1,6 @@
-{{- if .isServer -}}
+{{- /* Every role off Windows (Linux Server, macOS Desktop and Desktop + Server);
+Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
+{{- if ne .chezmoi.os "windows" -}}
 {{- $cbm := index .versions "codebase-memory-mcp" | default "" -}}
 #!/bin/sh
 # Claude Code: native install when missing, codebase-memory-mcp via its upstream
@@ -7,6 +9,9 @@
 # versions, then re-applies ~/.claude/settings.json because the cbm installer
 # and `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks
 # the login). Warns and exits 0 on any failure; never aborts apply.
+# A plain Desktop registers only the MCP servers whose command exists there and
+# installs an installer-made skill only when its installer exists; each one it
+# skips prints one warning and is not a failure (no retry marker).
 # Any warning (a download, an install, a prerequisite not there yet) leaves a
 # retry marker holding a fresh nonce, so the next apply (bin/update) reruns this
 # script after every failed run; a clean run removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
@@ -20,6 +25,10 @@ cd "$HOME" || exit 0
 {{ template "retry-sh" "50-claude" }}
 FAILED=
 warn() { echo "warning: $*" >&2; FAILED=1; }
+{{- if not .isServer }}
+# skipped: a desktop lacks this runtime; not a failure.
+skipped() { echo "warning: $*" >&2; }
+{{- end }}
 # done_or_retry: record the outcome for the next apply, then exit 0.
 done_or_retry() {
     if [ -n "$FAILED" ]; then
@@ -92,7 +101,11 @@ if command -v graphify >/dev/null 2>&1; then
     fi
     rm -rf "$tmp"
 else
+{{- if $.isServer }}
     warn "graphify missing; skipping the graphify skill"
+{{- else }}
+    skipped "graphify not installed on this desktop; skipping the graphify skill"
+{{- end }}
 fi
 {{- end }}
 {{- end }}
@@ -130,8 +143,16 @@ if [ -n "$CLAUDE_OK" ]; then
 {{- range .mcp }}
 {{- if has "claude" .clients }}
 {{- $v := index $.versions .name }}
+{{- if not $.isServer }}
+if ! command -v {{ .command | squote }} >/dev/null 2>&1; then
+    skipped "{{ .command }} not found on this desktop; skipping MCP server {{ trimPrefix "mcp-" .name }}"
+else
+{{- end }}
 mcp_server {{ trimPrefix "mcp-" .name | squote }} {{ .command | squote }}
 {{- range .args }} {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }}
+{{- if not $.isServer }}
+fi
+{{- end }}
 {{- end }}
 {{- end }}
 fi

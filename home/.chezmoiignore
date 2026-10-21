@@ -1,4 +1,4 @@
-{{- /* Server-only paths are ignored unless .isServer (a plain Desktop gets no Claude Code or Codex); Desktop-only unless .isDesktop; ~/.zshrc is macOS only. */ -}}
+{{- /* Server-only paths are ignored unless .isServer (a plain Desktop gets Claude Code but no Codex); Desktop-only unless .isDesktop; ~/.zshrc is macOS only. */ -}}
 README.md
 {{ if not .isServer }}
 .ssh/authorized_keys
@@ -10,7 +10,6 @@ README.md
 .tcshrc
 .cshrc
 .codex
-.claude
 .config/paper-search-mcp
 {{ end }}
 {{ if ne .chezmoi.os "darwin" }}

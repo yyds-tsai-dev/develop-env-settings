@@ -87,9 +87,10 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   printf '%s\n' "$output" > "$SB/built.json"; json_ok "$SB/built.json"
 }
 
-@test "plain desktop gets no Claude Code: install script empty, ~/.claude ignored" {
+# init_plain_desktop: a plain desktop config (on Linux, where the desktop role
+# is refused, a server config with its data rewritten to the desktop role).
+init_plain_desktop() {
   if [ "$(uname -s)" = Linux ]; then
-    # the desktop role is refused on Linux: write a server config, rewrite its data
     init_role server >&2
     sed -e 's/^\( *role = \).*/\1"desktop"/' -e 's/^\( *isServer = \).*/\1false/' \
         -e 's/^\( *isDesktop = \).*/\1true/' "$SB_CONFIG" > "$SB/cfg.new"
@@ -97,12 +98,138 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   else
     init_role desktop >&2
   fi
-  for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl; do
-    sed 's/\.chezmoi\.os/"darwin"/g' "$REPO_ROOT/home/.chezmoiscripts/$s" | chezmoi_iso execute-template > "$SB/out"
-    [ -z "$(tr -d '[:space:]' < "$SB/out")" ] || { echo "$s renders on a plain desktop"; false; }
+}
+
+# render_os OS SCRIPT: SCRIPT rendered with .chezmoi.os replaced by OS.
+render_os() {
+  sed "s/\.chezmoi\.os/\"$1\"/g" "$REPO_ROOT/home/.chezmoiscripts/$2" | chezmoi_iso execute-template
+}
+
+# sys_path: $SB/sys holding links to the basic system tools only, so a test
+# PATH ($STUB:$SB/sys) has no npx, uvx, graphify or claude from the host.
+sys_path() {
+  local t p
+  mkdir -p "$SB/sys"
+  for t in sh bash env awk sed grep cat cp mv rm mkdir mktemp cmp chmod tr head tail \
+           date dirname basename uname printf ls touch sort cut wc tee id find xargs; do
+    p="$(command -v "$t" 2>/dev/null)" && [ -x "$p" ] && ln -sf "$p" "$SB/sys/$t"
+  done
+  echo "$SB/sys"
+}
+
+blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
+
+@test "plain desktop gets Claude Code but no Codex: scripts render per OS, ~/.claude managed" {
+  init_plain_desktop
+  # macOS: the sh scripts; Windows: the ps1 twins; Codex nowhere
+  for s in "$SCRIPT" run_onchange_after_60-statusline.sh.tmpl; do
+    out="$(render_os darwin "$s")"; ! blank "$out" || { echo "$s empty on a macOS desktop"; false; }
+    out="$(render_os windows "$s")"; blank "$out" || { echo "$s renders on windows"; false; }
+  done
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+    out="$(render_os windows "$s")"; ! blank "$out" || { echo "$s empty on a windows desktop"; false; }
+    out="$(render_os darwin "$s")"; blank "$out" || { echo "$s renders on macOS"; false; }
+  done
+  for o in darwin windows; do
+    out="$(render_os "$o" run_onchange_after_55-codex.sh.tmpl)"; blank "$out" || { echo "codex renders on a $o desktop"; false; }
   done
   run chezmoi_iso execute-template < "$REPO_ROOT/home/.chezmoiignore"
-  for p in .claude .codex .config/paper-search-mcp; do printf '%s\n' "$output" | grep -qx "$p"; done
+  for p in .codex .config/paper-search-mcp; do printf '%s\n' "$output" | grep -qx "$p"; done
+  ! printf '%s\n' "$output" | grep -qx '.claude'
+}
+
+@test "windows install script: native installer, cbm for Claude only, MCP servers guarded by runtime" {
+  init_plain_desktop
+  render_os windows run_onchange_after_50-claude.ps1.tmpl > "$SB/claude.ps1"
+  f="$SB/claude.ps1"
+  grep -qF "Get-Script 'https://claude.ai/install.ps1'" "$f"
+  grep -qF -- '-File $inst "--dir=$bin" --skip-config' "$f"
+  grep -qF -- 'install -y --skip-binary --clients=claude "--dir=$bin"' "$f"
+  grep -qF "\$cbmVersion = '$(lock codebase-memory-mcp)'" "$f"
+  grep -qF "Set-McpServer 'semble' @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble')" "$f"
+  for c in uvx codebase-memory-mcp npx; do
+    grep -qF "if (-not (Test-Cmd '$c')) {" "$f" || { echo "no runtime guard for $c"; false; }
+  done
+  ! grep -qE "Set-McpServer '(graphify|paper-search)'" "$f"   # codex-only servers
+  grep -qF "Skip-Step 'graphify not installed on this desktop; skipping the graphify skill'" "$f"
+  for p in $(manifest_plugins); do grep -qF "& claude plugin install '$p'" "$f"; done
+  grep -q '^# retry: $' "$f"
+  grep -q 'Set-RetryMarker' "$f"
+  ! grep -qiE 'login|setup-token' "$f"
+  ! grep -qE '/home/|/ldaphome|/Users/|C:\\Users' "$f"
+}
+
+@test "plain desktop install script: only MCP servers whose command exists, skips are not failures" {
+  [ "$(uname -s)" = Linux ] || skip "stub-only PATH needs a linux host"
+  sys="$(sys_path)"
+  init_plain_desktop
+  render_os darwin "$SCRIPT" > "$SB/claude.sh"
+  sh -n "$SB/claude.sh"
+  grep -qF "if ! command -v 'npx' >/dev/null 2>&1; then" "$SB/claude.sh"
+  fake_claude
+  rm -f "$STUB/graphify"          # no uv tools on a plain desktop
+  stub uvx 'exit 0'               # uv comes with Bootstrap; npx is missing here
+  HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
+  echo "$output"; cat "$SB/calls"
+  [ "$status" -eq 0 ]
+  grep -q '^mcp add -s user semble -- uvx ' "$SB/calls"
+  grep -qx 'mcp add -s user codebase-memory-mcp -- codebase-memory-mcp' "$SB/calls"
+  ! grep -q 'mcp add -s user drawio' "$SB/calls"
+  [ "$(grep -c 'npx not found on this desktop; skipping MCP server drawio' <<<"$output")" -eq 1 ]
+  [ "$(grep -c 'skipping the graphify skill' <<<"$output")" -eq 1 ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]   # a skip is not a failure
+  for p in $(manifest_plugins); do grep -qx "plugin install $p" "$SB/calls"; done
+  json_ok "$SB_HOME/.claude/settings.json"
+}
+
+@test "server install script has no desktop runtime guards" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  ! grep -q 'not found on this desktop' "$f"
+  ! grep -q 'not installed on this desktop' "$f"
+  grep -qF 'warn "graphify missing; skipping the graphify skill"' "$f"
+}
+
+@test "doctor on a plain desktop expects only the MCP servers and installer skills present there" {
+  [ "$(uname -s)" = Linux ] || skip "stub-only PATH needs a linux host"
+  sys="$(sys_path)"
+  fake_claude
+  rm -f "$STUB/graphify" "$STUB/codebase-memory-mcp"
+  stub uvx 'exit 0'
+  for p in $(manifest_plugins); do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
+  cat > "$STUB/claude" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "--version "*) echo "9.9.9 (Claude Code)" ;;
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp list") cat "$SB/mcplist" ;;
+  "auth status") exit 1 ;;
+esac
+EOF
+  printf 'semble: uvx - \342\234\224 Connected\n' > "$SB/mcplist"
+  for s in find-skills paper-search; do
+    mkdir -p "$SB_HOME/.claude/skills/$s"; : > "$SB_HOME/.claude/skills/$s/SKILL.md"
+  done
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$sys" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  for c in claude_installed claude_plugins claude_mcp claude_skills; do [[ "$output" == *"PASS $c"* ]]; done
+  [[ "$output" == *"WARN statusline_installed"* ]]
+  [[ "$output" == *"SKIP claude_login: login check skipped in --ci"* ]]
+  [[ "$output" != *"server role only"* ]]
+  # once codebase-memory-mcp is installed, its server and skill are expected
+  stub codebase-memory-mcp 'exit 0'
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$sys" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not registered: codebase-memory-mcp:"* ]]
+  [[ "$output" == *"FAIL claude_skills: skill(s) missing from ~/.claude/skills: codebase-memory:"* ]]
+  [[ "$output" != *"drawio"* ]]
+  # a server role expects every server and skill whatever is on PATH
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$sys" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [[ "$output" == *"not registered: codebase-memory-mcp drawio:"* ]]
+  [[ "$output" == *"missing from ~/.claude/skills: graphify codebase-memory:"* ]]
 }
 
 @test "install script leaves a retry marker on failure and removes it after a clean run" {

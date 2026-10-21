@@ -203,15 +203,20 @@ EOF
   fi
 }
 
-@test "desktop role on darwin ignores server-only files" {
+@test "desktop role on darwin ignores server-only files and manages Claude Code" {
   init_desktop
   stub_bw locked
   apply_with "$STUB"
   [ "$status" -eq 0 ]
-  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .claude .config/paper-search-mcp .ssh/authorized_keys; do
+  for p in .tmux.conf .bashrc .tcshrc .cshrc .condarc .config/fish .config/git .codex .config/paper-search-mcp .ssh/authorized_keys; do
     [ ! -e "$SB_DEST/$p" ] || { echo "server-only $p rendered on a desktop" >&2; false; }
   done
   [ -f "$SB_DEST/.wezterm.lua" ]
+  # Claude Code (not Codex) on every Desktop: the same user files as a Server
+  for p in .claude/CLAUDE.md .claude/settings.json .claude/agents/worker.md .claude/agents/semble-search.md; do
+    [ -s "$SB_DEST/$p" ] || { echo "$p missing on a desktop" >&2; false; }
+  done
+  grep -q '"statusLine"' "$SB_DEST/.claude/settings.json"
 }
 
 @test "server role does not manage wezterm or ~/.ssh/config" {
@@ -349,8 +354,8 @@ EOF
   DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"SKIP codex_installed: server role only"* ]]
   DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
-  [[ "$output" == *"SKIP claude_mcp: server role only"* ]]
-  [[ "$output" == *"SKIP claude_skills: server role only"* ]]
+  [[ "$output" == *"claude_mcp"* ]]   # Claude Code checks run on every role
+  [[ "$output" != *"server role only"* ]]
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"codex_installed"* ]]
   [[ "$output" != *"server role only"* ]]
@@ -456,6 +461,80 @@ EOF
   [[ "$output" == *'"command": "\"$HOME/.claude/statusline-bin\""'* ]]
 }
 
+@test "claude settings call the cbm hooks through cmd.exe and .cmd shims on windows only" {
+  init_desktop
+  t='{{ template "claude-settings.json" (merge (dict "chezmoi" (merge (dict "os" "OS") .chezmoi)) .) }}'
+  run chezmoi_iso execute-template "${t/OS/windows}"
+  [ "$status" -eq 0 ]
+  printf '%s\n' "$output" > "$SB/win.json"
+  # the exact form codebase-memory-mcp's installer writes on Windows (JSON-escaped)
+  for h in cbm-code-discovery-gate cbm-session-reminder cbm-subagent-reminder; do
+    want="\"command\": \"cmd.exe /d /v:off /s /c '\\\"\\\"%USERPROFILE%\\\\.claude\\\\hooks\\\\$h.cmd\\\"\\\"'\""
+    grep -qF "$want" "$SB/win.json" || { echo "windows hook $h: want $want"; false; }
+  done
+  ! grep -qF '$HOME/.claude/hooks' "$SB/win.json"
+  py="$(command -v python3 || command -v python || true)"
+  [ -z "$py" ] || "$py" -c 'import json,sys; json.load(open(sys.argv[1]))' "$SB/win.json"
+  run chezmoi_iso execute-template "${t/OS/darwin}"
+  [[ "$output" == *'"command": "\"$HOME/.claude/hooks/cbm-code-discovery-gate\""'* ]]
+  [[ "$output" != *cmd.exe* ]]
+}
+
+@test "rendered windows Claude and status line scripts parse in PowerShell" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  init_desktop
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+    f="$(render_for windows "$s")"
+    [ -s "$f" ]
+    cp "$f" "$f.ps1"
+    run ps_parse "$f.ps1"
+    echo "$s: $output"
+    [ "$status" -eq 0 ]
+  done
+}
+
+@test "doctor.ps1 Claude checks on a desktop expect only the MCP servers whose command exists" {
+  command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
+  is_windows && skip "stub claude is a sh script"
+  mkdir -p "$SB_HOME/.claude/skills/find-skills" "$SB_HOME/.claude/skills/paper-search"
+  : > "$SB_HOME/.claude/skills/find-skills/SKILL.md"; : > "$SB_HOME/.claude/skills/paper-search/SKILL.md"
+  plugins="$(sed -n 's/^ *- { name: "\([^"]*@[^"]*\)".*/\1/p' "$REPO_ROOT/home/.chezmoidata/manifest.yaml")"
+  for p in $plugins; do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
+  printf 'semble: uvx - \342\234\224 Connected\n' > "$SB/mcplist"
+  cat > "$STUB/claude" <<STUBEOF
+#!/bin/sh
+case "\$1 \$2" in
+  "--version "*) echo 9.9.9 ;;
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp list") cat "$SB/mcplist" ;;
+esac
+exit 0
+STUBEOF
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/uvx"
+  chmod +x "$STUB/claude" "$STUB/uvx"
+  # PATH: the stubs and the basic system dirs only (no host npx or codebase-memory-mcp)
+  cat > "$SB/run.ps1" <<PSEOF
+\$env:PATH = '$STUB' + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
+foreach (\$c in 'npx', 'codebase-memory-mcp', 'graphify') { if (Get-Command \$c -ErrorAction SilentlyContinue) { "SKIPTEST \$c on PATH"; exit 0 } }
+\$env:HOME = '$SB_HOME'
+& pwsh -NoProfile -File '$REPO_ROOT/bin/doctor.ps1' -Ci
+exit \$LASTEXITCODE
+PSEOF
+  DEVENV_ROLE=desktop DOCTOR_ONLY='60-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
+  [ "$status" -eq 0 ]
+  for c in claude_installed claude_plugins claude_mcp claude_skills; do [[ "$output" == *"PASS $c"* ]]; done
+  [[ "$output" == *"WARN statusline_installed"* ]]
+  [[ "$output" == *"SKIP claude_login"* ]]
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/npx"; chmod +x "$STUB/npx"
+  sed -i.bak '/SKIPTEST/d' "$SB/run.ps1"
+  DEVENV_ROLE=desktop DOCTOR_ONLY='60-*' run pwsh -NoProfile -File "$SB/run.ps1"
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL claude_mcp: MCP server(s) not registered: drawio"* ]]
+}
+
 @test "mac scripts carry a Homebrew marker so installing Homebrew reruns them" {
   init_desktop "desktop+server"
   if [ -x /opt/homebrew/bin/brew ] || [ -x /usr/local/bin/brew ]; then want=present; else want=absent; fi
@@ -522,13 +601,15 @@ EOF
   [[ "$output" == *"SKIP paper_search_env: server role only"* ]]
 }
 
-@test "doctor: plain desktop SKIPs every Claude check; server role WARNs on a missing status line" {
-  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor"
+@test "doctor: plain desktop runs every Claude check; every role WARNs on a missing status line" {
+  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
-  [ "$status" -eq 0 ]
   for c in claude_installed claude_plugins claude_mcp claude_skills statusline_installed claude_login; do
-    [[ "$output" == *"SKIP $c: server role only"* ]]
+    [[ "$output" == *" $c"* ]]
+    [[ "$output" != *"$c: server role only"* ]]
   done
+  [[ "$output" == *"WARN statusline_installed:"*"release download failed"* ]]
+  [[ "$output" == *"SKIP claude_login: login check skipped in --ci"* ]]
   DEVENV_ROLE=server HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [[ "$output" == *"WARN statusline_installed:"*"release download failed"*"bin/update"* ]]

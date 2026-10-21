@@ -1,0 +1,216 @@
+{{- /* Windows (the Desktop role; Server use goes through WSL2). PowerShell twin
+of run_onchange_after_50-claude.sh. */ -}}
+{{- if eq .chezmoi.os "windows" -}}
+{{- $cbm := index .versions "codebase-memory-mcp" | default "" -}}
+# Claude Code: the official native installer (user scope, no admin) when
+# missing, codebase-memory-mcp via its upstream install.ps1 (binary only, then
+# `codebase-memory-mcp install --clients=claude` writes its hooks, agents and
+# skill), third-party skills, marketplaces and plugins from the Manifest,
+# user-scope MCP servers at locked versions, then re-applies
+# ~/.claude/settings.json because the cbm installer and
+# `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks the
+# login). Never aborts apply.
+# Only the MCP servers whose command exists here are registered, and an
+# installer-made skill is installed only when its installer exists; each one
+# skipped prints one warning and is not a failure (no retry marker). Any other
+# warning leaves a retry marker with a fresh nonce, so the next apply (re-run
+# the bootstrap one-liner) reruns this after every failed run; a clean run
+# removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
+# Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+{{ template "retry-ps1" "50-claude" }}
+$script:failed = $false
+function Warn-Step([string]$Message) { Write-Warning $Message; $script:failed = $true }
+# Skip-Step: this desktop lacks the runtime; not a failure.
+function Skip-Step([string]$Message) { Write-Warning $Message }
+function Test-Cmd([string]$Name) { [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+# Get-Script URL: download URL to a temp .ps1 and return its path, or $null.
+function Get-Script([string]$Url) {
+    $f = Join-Path ([IO.Path]::GetTempPath()) ('devenv-' + [guid]::NewGuid() + '.ps1')
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $Url -OutFile $f
+        return $f
+    } catch {
+        Remove-Item -Force -ErrorAction SilentlyContinue $f
+        return $null
+    }
+}
+
+$bin = Join-Path $HOME '.local\bin'
+$env:Path = $bin + [IO.Path]::PathSeparator + $env:Path
+Set-Location $HOME
+
+# --- Claude Code (native installer, latest; it updates itself) ---
+# The file form of `irm https://claude.ai/install.ps1 | iex`, so the installer's
+# own `exit` cannot end this script.
+function Test-Claude {
+    if (-not (Test-Cmd 'claude')) { return $false }
+    & claude --version *> $null
+    return ($LASTEXITCODE -eq 0)
+}
+if (-not (Test-Claude)) {
+    $inst = Get-Script 'https://claude.ai/install.ps1'
+    if ($inst) {
+        & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $inst
+        if ($LASTEXITCODE -ne 0) { Warn-Step 'Claude Code native install failed' }
+        Remove-Item -Force -ErrorAction SilentlyContinue $inst
+    } else {
+        Warn-Step 'could not download the Claude Code installer (https://claude.ai/install.ps1)'
+    }
+}
+$claudeOk = Test-Claude
+if (-not $claudeOk) { Warn-Step 'claude missing; skipping plugins and MCP servers' }
+
+# --- codebase-memory-mcp (upstream installer pinned to the lock) ---
+# install.ps1 has no --clients: it installs the binary into ~/.local/bin with
+# --skip-config, then the binary configures Claude only (Codex is not on a
+# Desktop). Its hooks and MCP registration are put back below.
+$cbmVersion = '{{ $cbm }}'
+$cbmHave = ''
+if (Test-Cmd 'codebase-memory-mcp') { $cbmHave = "$(& codebase-memory-mcp --version 2>$null)".Trim() }
+if (($cbmHave -ne "codebase-memory-mcp $cbmVersion") -and ($cbmVersion -or -not (Test-Cmd 'codebase-memory-mcp'))) {
+    if ($cbmVersion) {
+        $ref = "v$cbmVersion"; $dl = "https://github.com/DeusData/codebase-memory-mcp/releases/download/v$cbmVersion"
+    } else {
+        $ref = 'main'; $dl = 'https://github.com/DeusData/codebase-memory-mcp/releases/latest/download'
+    }
+    $inst = Get-Script "https://raw.githubusercontent.com/DeusData/codebase-memory-mcp/$ref/install.ps1"
+    if ($inst) {
+        $env:CBM_DOWNLOAD_URL = $dl
+        & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $inst "--dir=$bin" --skip-config
+        $rc = $LASTEXITCODE
+        Remove-Item Env:CBM_DOWNLOAD_URL -ErrorAction SilentlyContinue
+        Remove-Item -Force -ErrorAction SilentlyContinue $inst
+        $cbmExe = Join-Path $bin 'codebase-memory-mcp.exe'
+        if ($rc -ne 0 -or -not (Test-Path $cbmExe)) {
+            Warn-Step "codebase-memory-mcp $cbmVersion install failed"
+        } else {
+            & $cbmExe install -y --skip-binary --clients=claude "--dir=$bin"
+            if ($LASTEXITCODE -ne 0) { Warn-Step 'codebase-memory-mcp could not configure Claude Code' }
+        }
+    } else {
+        Warn-Step "could not download the codebase-memory-mcp $ref installer"
+    }
+}
+
+# --- third-party skills ---
+# Get-Skill DIR URL: install URL as ~/.claude/skills/DIR/SKILL.md
+function Get-Skill([string]$Dir, [string]$Url) {
+    $dst = Join-Path $HOME ".claude\skills\$Dir\SKILL.md"
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('devenv-skill-' + [guid]::NewGuid())
+    try {
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $Url -OutFile $tmp
+        New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+        if (-not (Test-Path $dst) -or (Get-FileHash $tmp).Hash -ne (Get-FileHash $dst).Hash) {
+            Copy-Item -Force $tmp $dst
+        }
+    } catch {
+        Warn-Step "could not download skill $Dir from ${Url}: $_"
+    }
+    Remove-Item -Force -ErrorAction SilentlyContinue $tmp
+}
+{{- range .claude.skills }}
+{{- if index . "url" }}
+{{- $v := index $.versions (index . "version_from" | default .name) }}
+{{- $ref := "main" }}{{ if $v }}{{ $ref = printf "v%s" $v }}{{ end }}
+Get-Skill {{ .dir | squote }} {{ replace "{ref}" $ref .url | squote }}
+{{- else if eq (index . "installer" | default "") "graphify" }}
+if (Test-Cmd 'graphify') {
+    # CLAUDE_CONFIG_DIR: graphify also writes its block into CLAUDE.md, which chezmoi
+    # manages; install into a scratch dir and keep only the skill.
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('devenv-graphify-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $env:CLAUDE_CONFIG_DIR = $tmp
+    & graphify install *> $null
+    $rc = $LASTEXITCODE
+    Remove-Item Env:CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue
+    if ($rc -eq 0 -and (Test-Path (Join-Path $tmp 'skills\graphify\SKILL.md'))) {
+        $dst = Join-Path $HOME '.claude\skills\graphify'
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $dst
+        New-Item -ItemType Directory -Force -Path $dst | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $tmp 'skills\graphify\*') $dst
+    } else {
+        Warn-Step 'graphify install failed'
+    }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
+} else {
+    Skip-Step 'graphify not installed on this desktop; skipping the graphify skill'
+}
+{{- end }}
+{{- end }}
+
+if ($claudeOk) {
+    # --- marketplaces and plugins ---
+    $mkts = (& claude plugin marketplace list --json 2>$null) -join "`n"
+{{- range .claude.marketplaces }}
+    if (-not $mkts.Contains('"name": "{{ .name }}"')) {
+        & claude plugin marketplace add {{ .repo | squote }}
+        if ($LASTEXITCODE -ne 0) { Warn-Step 'could not add marketplace {{ .name }}' }
+    }
+{{- end }}
+    $plugins = (& claude plugin list --json 2>$null) -join "`n"
+{{- range .claude.plugins }}
+    if (-not $plugins.Contains('"id": "{{ .name }}"')) {
+        & claude plugin install {{ .name | squote }}
+        if ($LASTEXITCODE -ne 0) { Warn-Step 'could not install plugin {{ .name }}' }
+    }
+{{- end }}
+
+    # --- MCP servers (user scope) ---
+    # Set-McpServer NAME COMMAND [ARG]...: register unless `claude mcp get` already
+    # shows the same command and args; a different registration is replaced.
+    # The argument lists are splatted so `--` reaches claude unchanged.
+    function Set-McpServer([string]$Name, [string[]]$CommandLine) {
+        $got = @(& claude mcp get $Name 2>$null)
+        if ($LASTEXITCODE -ne 0) { $got = @() }
+        $cmd = ''; $cmdArgs = ''
+        foreach ($l in $got) {
+            if ($l -match '^\s*Command: (.*)$') { $cmd = $Matches[1].Trim() }
+            elseif ($l -match '^\s*Args:\s*(.*)$') { $cmdArgs = $Matches[1].Trim() }
+        }
+        $have = $cmd; if ($cmdArgs) { $have = "$cmd $cmdArgs" }
+        if ($cmd -and $have -eq ($CommandLine -join ' ')) { return }
+        if ($got.Count -gt 0) { $rm = @('mcp', 'remove', '-s', 'user', $Name); & claude @rm *> $null }
+        $add = @('mcp', 'add', '-s', 'user', $Name, '--') + $CommandLine
+        & claude @add *> $null
+        if ($LASTEXITCODE -ne 0) { Warn-Step "could not add MCP server $Name" }
+    }
+{{- range .mcp }}
+{{- if has "claude" .clients }}
+{{- $v := index $.versions .name }}
+    if (-not (Test-Cmd {{ .command | squote }})) {
+        Skip-Step '{{ .command }} not found on this desktop; skipping MCP server {{ trimPrefix "mcp-" .name }}'
+    } else {
+        Set-McpServer {{ trimPrefix "mcp-" .name | squote }} @({{ .command | squote }}
+{{- range .args }}, {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }})
+    }
+{{- end }}
+{{- end }}
+}
+
+# --- settings.json: the exact file chezmoi manages ---
+$settings = Join-Path $HOME '.claude\settings.json'
+$want = @'
+{{ template "claude-settings.json" . -}}
+'@
+$want = ($want -replace "`r`n", "`n") + "`n"
+$cur = $null
+if (Test-Path $settings) { $cur = [IO.File]::ReadAllText($settings) }
+if ($cur -ne $want) {
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path $settings) | Out-Null
+        [IO.File]::WriteAllText($settings, $want, (New-Object Text.UTF8Encoding $false))
+    } catch { Warn-Step "could not write ${settings}: $_" }
+}
+
+if ($script:failed) {
+    Set-RetryMarker
+    Write-Warning '50-claude had failures; re-running the bootstrap one-liner retries it'
+} else {
+    Clear-RetryMarker
+}
+exit 0
+{{- end }}
