@@ -1,0 +1,19 @@
+#!/bin/sh
+# Merges the committed public keys into ~/.ssh/authorized_keys (existing lines
+# kept). merge_authorized_keys.py is stdlib-only: uv runs it, else python3 -I.
+# The current file is buffered first, so when neither works it is printed back
+# unchanged with a warning: apply never aborts and the file is never truncated.
+PATH="$HOME/.local/bin:$PATH"
+in="$(mktemp)" && out="$(mktemp)" || { echo "warning: ~/.ssh/authorized_keys left unchanged (mktemp failed)" >&2; exec cat; }
+trap 'rm -f "$in" "$out"' EXIT
+cat > "$in"
+merge={{ .chezmoi.workingTree | squote }}/lib/merge_authorized_keys.py
+keys={{ .chezmoi.workingTree | squote }}/ssh/authorized_keys.pub-list
+if command -v uv >/dev/null 2>&1 && uv run --quiet --script "$merge" "$keys" < "$in" > "$out"; then
+    cat "$out"; exit 0
+fi
+if command -v python3 >/dev/null 2>&1 && python3 -I "$merge" "$keys" < "$in" > "$out"; then
+    cat "$out"; exit 0
+fi
+echo "warning: could not merge the committed keys (no working uv or python3); ~/.ssh/authorized_keys left unchanged" >&2
+cat "$in"

@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# Cleanup: lists the old tools that apply leaves in place, then (after a y/N
+# prompt, or with --yes) removes them:
+#   - the old fish install: micromamba prefix ~/.local/fish-env or env fish-env
+#   - ~/.nvm
+#   - tarball Node: ~/.local/node-v* and the ~/.local/node link
+#   - ~/.local/bin symlinks that dangle or point into one of the above
+# Usage: bin/cleanup [--yes]
+set -u
+yes=
+case "${1:-}" in
+  --yes|-y) yes=1 ;;
+  "") ;;
+  *) echo "usage: bin/cleanup [--yes]" >&2; exit 2 ;;
+esac
+[ -n "${HOME:-}" ] && [ "$HOME" != / ] || { echo "error: HOME is not set" >&2; exit 1; }
+
+found=()
+add() { if [ -e "$1" ] || [ -L "$1" ]; then found+=("$1"); fi; }
+
+add "$HOME/.local/fish-env"
+roots=("$HOME/micromamba")
+[ -n "${MAMBA_ROOT_PREFIX:-}" ] && [ "$MAMBA_ROOT_PREFIX" != "$HOME/micromamba" ] && roots+=("$MAMBA_ROOT_PREFIX")
+for r in "${roots[@]}"; do add "$r/envs/fish-env"; done
+add "$HOME/.nvm"
+for d in "$HOME"/.local/node-v*; do add "$d"; done
+[ -L "$HOME/.local/node" ] && add "$HOME/.local/node"
+
+# Real directories among the candidates (plain files, e.g. a node-v*.tar.xz, are
+# removal targets themselves but never a prefix for matching links).
+dirs=()
+for p in ${found[@]+"${found[@]}"}; do
+  [ -d "$p" ] && [ ! -L "$p" ] || continue
+  d="$(cd "$p" 2>/dev/null && pwd -P)" && [ -n "$d" ] && [ "$d" != / ] && dirs+=("$d")
+done
+# Links into the current environment are never listed.
+live=()
+for d in "$HOME/micromamba/envs/cli-tools" "$HOME/micromamba/envs/pdftools" \
+         "${XDG_DATA_HOME:-$HOME/.local/share}/uv" "${XDG_DATA_HOME:-$HOME/.local/share}/fnm"; do
+  [ -d "$d" ] && live+=("$(cd "$d" && pwd -P)")
+done
+for l in "$HOME"/.local/bin/* "$HOME"/.local/bin/.[!.]*; do
+  [ -L "$l" ] || continue
+  if [ ! -e "$l" ]; then add "$l"; continue; fi
+  t="$(readlink -f "$l" 2>/dev/null)" && [ -n "$t" ] || continue
+  keep=
+  for d in ${live[@]+"${live[@]}"}; do
+    case "$t" in "$d"/*) keep=1; break ;; esac
+  done
+  [ -z "$keep" ] || continue
+  for d in ${dirs[@]+"${dirs[@]}"}; do
+    case "$t" in "$d"/*) add "$l"; break ;; esac
+  done
+done
+
+if [ "${#found[@]}" -eq 0 ]; then
+  echo "nothing to clean up"
+  exit 0
+fi
+echo "old tools that the managed environment no longer uses:"
+for p in "${found[@]}"; do echo "  $p"; done
+if [ -z "$yes" ]; then
+  printf 'Remove them? [y/N] '
+  ans=; read -r ans || ans=
+  case "$ans" in
+    y|Y|yes|YES) ;;
+    *) echo "kept everything"; exit 0 ;;
+  esac
+fi
+rc=0
+for p in "${found[@]}"; do
+  if rm -rf -- "$p"; then echo "removed $p"; else echo "error: could not remove $p" >&2; rc=1; fi
+done
+exit "$rc"

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Capture: pull machine state back into this repo for review. Never commits.
+#   1. chezmoi re-add (edited managed files)
+#   2. desktop/vscode/server-extensions.txt from ~/.vscode-server/extensions
+#   3. manifest claude.plugins/marketplaces, uv_tools, cli_tools, pdftools
+#      (membership only; Version lock and comments untouched) via lib/capture_manifest.py
+#   4. git diff --stat of the repo
+# Usage: bin/capture
+set -u
+PATH="$HOME/.local/bin:$PATH"; export PATH
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if command -v chezmoi >/dev/null 2>&1; then
+  chezmoi re-add || echo "warning: chezmoi re-add failed" >&2
+else
+  echo "warning: chezmoi not found; skipping re-add" >&2
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  uv run --script "$ROOT/lib/capture_manifest.py" || echo "warning: manifest capture failed" >&2
+elif command -v python3 >/dev/null 2>&1; then
+  python3 "$ROOT/lib/capture_manifest.py" || echo "warning: manifest capture failed" >&2
+else
+  echo "warning: neither uv nor python3 found; manifest capture skipped" >&2
+fi
+
+echo "--- git diff --stat ($ROOT) ---"
+git -C "$ROOT" diff --stat
+untracked="$(git -C "$ROOT" ls-files --others --exclude-standard)"
+[ -z "$untracked" ] || { echo "untracked:"; echo "$untracked" | sed 's/^/  /'; }
+echo "Review the diff and commit it yourself; capture never commits."
+exit 0

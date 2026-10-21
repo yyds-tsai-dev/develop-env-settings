@@ -1,0 +1,20 @@
+# Managed PATH order: ~/.local/bin first, once.
+set -gx MAMBA_ROOT_PREFIX "$HOME/micromamba"
+
+function __de_path_first
+    while set -l i (contains -i -- $HOME/.local/bin $PATH)
+        set -e PATH[$i]
+    end
+    set -gx PATH $HOME/.local/bin $PATH
+end
+__de_path_first
+
+if command -q micromamba
+    micromamba shell hook -s fish --root-prefix $MAMBA_ROOT_PREFIX 2>/dev/null | source
+end
+if command -q fnm
+    fnm env --use-on-cd --shell fish 2>/dev/null | source
+end
+# hooks above may prepend their own dirs
+__de_path_first
+functions -e __de_path_first

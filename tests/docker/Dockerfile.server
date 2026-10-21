@@ -1,0 +1,16 @@
+# Linux Server test image: a fresh Ubuntu with only curl, git, ca-certificates,
+# openssh-client (ssh-keyscan) and procps (ps) from the system package manager,
+# and a non-root user `dev` without sudo. EXTRA_PKGS adds packages for variants
+# (e.g. a system tmux). bzip2 is deliberately absent (the prereqs script must
+# print, not run, the install).
+FROM ubuntu:22.04
+ARG UID=1000
+ARG EXTRA_PKGS=
+RUN apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      curl git ca-certificates openssh-client procps $EXTRA_PKGS \
+ && rm -rf /var/lib/apt/lists/*
+# -l: no lastlog entry (large host UIDs would make a huge sparse file)
+RUN useradd -l -m -u "$UID" -s /bin/bash dev
+USER dev
+WORKDIR /home/dev

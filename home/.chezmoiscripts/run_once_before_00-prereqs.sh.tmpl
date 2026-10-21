@@ -1,0 +1,15 @@
+{{- if and .isServer (eq .chezmoi.os "linux") -}}
+#!/bin/sh
+# Lists the system packages Bootstrap needs but cannot install (no admin rights)
+# as a command for the person to run. Never runs it; always exits 0.
+missing=
+for t in curl git tar bzip2; do
+    command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
+done
+if [ -n "$missing" ]; then
+    echo "warning: missing system packages:$missing" >&2
+    echo "  ask an admin, or run it yourself if you can:" >&2
+    echo "    sudo apt install$missing" >&2
+fi
+exit 0
+{{- end }}

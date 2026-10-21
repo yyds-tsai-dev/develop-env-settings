@@ -1,0 +1,12 @@
+{{- /*
+retry-marker: the "# retry:" comment line of an install script. Input: dict with
+chezmoi (.chezmoi) and name (the script's marker name, e.g. "50-claude").
+It prints the nonce the script's last failed run wrote into
+~/.local/state/develop-env/retry/<name>, or nothing when no retry is pending.
+Every failure writes a new nonce, so the rendered script changes after each
+failed run and chezmoi (which keys run_onchange_ scripts by content) runs it
+again on the next apply; a clean run deletes the marker. Pair it with
+retry-sh (sh) or retry-ps1 (PowerShell). Use:
+  {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
+*/ -}}
+{{ $m := joinPath .chezmoi.homeDir ".local/state/develop-env/retry" .name }}# retry: {{ if stat $m }}{{ include $m | trim }}{{ end }}

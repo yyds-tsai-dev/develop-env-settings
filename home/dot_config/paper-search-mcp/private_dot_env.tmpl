@@ -1,0 +1,8 @@
+{{- /* Secret file. Skipped (left untouched) by .chezmoiignore via bw-ready unless the vault is unlocked and both fields exist. */ -}}
+{{- $d := dict "chezmoi" .chezmoi "item" "paper-search" -}}
+{{- $ieee := includeTemplate "bw-field" (merge (dict "field" "ieee_api_key") $d) | trim -}}
+{{- $mail := includeTemplate "bw-field" (merge (dict "field" "unpaywall_email") $d) | trim -}}
+{{- if and $ieee $mail -}}
+PAPER_SEARCH_MCP_IEEE_API_KEY={{ $ieee }}
+PAPER_SEARCH_MCP_UNPAYWALL_EMAIL={{ $mail }}
+{{ end -}}

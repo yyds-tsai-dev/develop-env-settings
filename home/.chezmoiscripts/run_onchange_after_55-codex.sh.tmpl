@@ -1,0 +1,181 @@
+{{- if and .isServer (ne .chezmoi.os "windows") -}}
+{{- $codex := index .versions "codex" | default "" -}}
+#!/bin/sh
+# Codex: the standalone build at the locked version, the codebase-memory-mcp
+# skill and agents (its installer run in a scratch HOME, so it never writes the
+# managed config.toml, AGENTS.md or a shell profile), the skill bundles from the
+# Manifest (repo tarball at a pinned ref, linked into ~/.codex/skills with
+# relative symlinks) and the find-skills / paper-search skills Claude also gets.
+# config.toml is merged by modify_private_config.toml; nothing logs in (Doctor
+# checks the login). Warns and exits 0 on any failure; never aborts apply.
+# Any warning (a download, an install, a prerequisite not there yet) leaves a
+# retry marker holding a fresh nonce, so the next apply (bin/update) reruns this
+# script after every failed run; a clean run removes it. (chezmoi keys run_onchange_ by name, so the apply after the one
+# that removed the marker runs it once more: harmless, every step is idempotent.)
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "55-codex") }}
+# Locks: codex={{ $codex }} codebase-memory-mcp={{ index .versions "codebase-memory-mcp" | default "" }}
+{{- range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+cd "$HOME" || exit 0
+
+{{ template "retry-sh" "55-codex" }}
+FAILED=
+warn() { echo "warning: $*" >&2; FAILED=1; }
+# done_or_retry: record the outcome for the next apply, then exit 0.
+done_or_retry() {
+    if [ -n "$FAILED" ]; then
+        retry_mark
+        echo "warning: 55-codex had failures; bin/update (or re-running bootstrap) retries it" >&2
+    else
+        retry_clear
+    fi
+    exit 0
+}
+
+# --- Codex standalone build (upstream install.sh at the locked tag) ---
+# ~/.local/bin is already on PATH above, so the installer edits no shell profile.
+CODEX_VERSION="{{ $codex }}"
+have="$(codex --version 2>/dev/null | sed -n 's/.* \([0-9][0-9A-Za-z.+-]*\)$/\1/p' | head -n 1)"
+if [ -z "$have" ] || { [ -n "$CODEX_VERSION" ] && [ "$have" != "$CODEX_VERSION" ]; }; then
+    if [ -n "$CODEX_VERSION" ]; then ref="rust-v$CODEX_VERSION"; else ref=main; fi
+    tmp="$(mktemp -d)"
+    if curl -fsSL --retry 3 -o "$tmp/install.sh" "https://raw.githubusercontent.com/openai/codex/$ref/scripts/install/install.sh"; then
+        CODEX_NON_INTERACTIVE=1 CODEX_RELEASE="${CODEX_VERSION:-latest}" sh "$tmp/install.sh" \
+            || warn "Codex $CODEX_VERSION install failed"
+    else
+        warn "could not download the Codex $ref installer"
+    fi
+    rm -rf "$tmp"
+fi
+
+SK="$HOME/.codex/skills"
+B="$HOME/.codex/skill-bundles"
+mkdir -p "$SK" "$B" "$HOME/.codex/agents" || { warn "cannot create ~/.codex dirs"; done_or_retry; }
+state="$(mktemp)"
+
+# --- codebase-memory-mcp skill and agents for Codex ---
+# Its MCP server and hooks are in the managed config.toml with a bare command.
+# The installer stops running cbm sessions, so it runs only when the installed
+# cbm version differs from the one the copies came from.
+cbm_have="$(codebase-memory-mcp --version 2>/dev/null | sed -n 's/^codebase-memory-mcp //p')"
+stamp="$SK/codebase-memory/.devenv-cbm-version"
+need=
+for f in skills/codebase-memory/SKILL.md agents/codebase-memory.toml \
+         agents/codebase-memory-scout.toml agents/codebase-memory-auditor.toml; do
+    [ -f "$HOME/.codex/$f" ] || need=1
+done
+[ "$(cat "$stamp" 2>/dev/null)" = "$cbm_have" ] || need=1
+if [ -z "$cbm_have" ]; then
+    warn "codebase-memory-mcp missing; skipping its Codex skill and agents"
+elif [ -n "$need" ]; then
+    tmp="$(mktemp -d)"
+    mkdir -p "$tmp/.codex"
+    if env -u CODEX_HOME -u CLAUDE_CONFIG_DIR HOME="$tmp" XDG_CONFIG_HOME="$tmp/.config" \
+            XDG_CACHE_HOME="$tmp/.cache" XDG_DATA_HOME="$tmp/.local/share" XDG_STATE_HOME="$tmp/.local/state" \
+            codebase-memory-mcp install -y --clients=codex --dir="$tmp/bin" >"$tmp/log" 2>&1 \
+       && [ -f "$tmp/.codex/skills/codebase-memory/SKILL.md" ]; then
+        mkdir -p "$SK/codebase-memory"
+        cp -R "$tmp/.codex/skills/codebase-memory/." "$SK/codebase-memory/"
+        for a in "$tmp"/.codex/agents/codebase-memory*.toml; do
+            [ -f "$a" ] && { cmp -s "$a" "$HOME/.codex/agents/${a##*/}" || cp "$a" "$HOME/.codex/agents/"; }
+        done
+        printf '%s\n' "$cbm_have" > "$stamp"
+    else
+        warn "codebase-memory-mcp install --clients=codex failed: $(tail -n 3 "$tmp/log" 2>/dev/null)"
+    fi
+    rm -rf "$tmp"
+fi
+[ -f "$SK/codebase-memory/SKILL.md" ] && echo "skill codebase-memory" >> "$state"
+
+# --- skills fetched as one SKILL.md (same url and lock as Claude's) ---
+fetch_skill() {
+    dst="$SK/$1/SKILL.md"
+    tmp="$(mktemp)"
+    if curl -fsSL --retry 3 -o "$tmp" "$2"; then
+        [ -L "$SK/$1" ] && rm -f "$SK/$1"
+        mkdir -p "$SK/$1"
+        cmp -s "$tmp" "$dst" || cat "$tmp" > "$dst"
+    else
+        warn "could not download skill $1 from $2"
+    fi
+    rm -f "$tmp"
+    [ -f "$dst" ] && echo "skill $1" >> "$state"
+}
+{{- range .claude.skills }}
+{{- if and (index . "url") (index . "codex") }}
+{{- $v := index $.versions (index . "version_from" | default .name) }}
+{{- $ref := "main" }}{{ if $v }}{{ $ref = printf "v%s" $v }}{{ end }}
+fetch_skill {{ .dir | squote }} {{ replace "{ref}" $ref .url | squote }}
+{{- end }}
+{{- end }}
+
+# --- skill bundles ---
+# fetch_bundle DIR REPO REF: unpack the REPO tarball at REF into $B/DIR once.
+fetch_bundle() {
+    [ -d "$B/$1" ] && return 0
+    tmp="$(mktemp -d "$B/.tmp.XXXXXX")" || return 1
+    if curl -fsSL --retry 3 -o "$tmp.tgz" "https://codeload.github.com/$2/tar.gz/$3" \
+       && tar -xzf "$tmp.tgz" -C "$tmp" --strip-components=1 && mv "$tmp" "$B/$1"; then
+        rm -f "$tmp.tgz"; return 0
+    fi
+    warn "could not fetch $2 at $3"
+    rm -rf "$tmp" "$tmp.tgz"; return 1
+}
+# link_skill DIR PATH: ~/.codex/skills/<basename PATH> -> ../skill-bundles/DIR/PATH.
+# An old symlink is replaced; a plain directory is moved to $B/.replaced/.
+link_skill() {
+    name="${2##*/}"; target="../skill-bundles/$1/$2"; dst="$SK/$name"
+    [ -f "$B/$1/$2/SKILL.md" ] || { warn "bundle $1 has no skill at $2"; return 1; }
+    if [ -L "$dst" ]; then
+        [ "$(readlink "$dst")" = "$target" ] || { rm -f "$dst" && ln -s "$target" "$dst"; }
+    else
+        if [ -e "$dst" ]; then
+            mkdir -p "$B/.replaced" && mv "$dst" "$B/.replaced/$name.$(date +%Y%m%d%H%M%S)" || return 1
+        fi
+        ln -s "$target" "$dst" || return 1
+    fi
+    echo "skill $name" >> "$state"
+}
+# bundle NAME DIR REPO REF SKILLS_DIR SKILLS_JSON [PATH]...: fetch and link one
+# bundle: every child of SKILLS_DIR holding a SKILL.md, every "./<path>" in the
+# "skills" list of SKILLS_JSON (a plugin.json in the bundle), and each PATH.
+bundle() {
+    bn="$1" bd="$2" brepo="$3" bref="$4" bsdir="$5" bjson="$6"; shift 6
+    fetch_bundle "$bd" "$brepo" "$bref" || return 0
+    bok=1
+    if [ -n "$bsdir" ]; then
+        bcount=0
+        for bs in "$B/$bd/$bsdir"/*/; do
+            [ -f "${bs}SKILL.md" ] || continue
+            bs="${bs%/}"; bcount=$((bcount + 1))
+            link_skill "$bd" "$bsdir/${bs##*/}" || bok=
+        done
+        [ "$bcount" -gt 0 ] || { warn "bundle $bn: no skills under $bsdir"; bok=; }
+    fi
+    if [ -n "$bjson" ]; then
+        bpaths="$(sed -n '/"skills" *: *\[/,/\]/s/^ *"\.\/\([^"]*\)",\{0,1\} *$/\1/p' "$B/$bd/$bjson" 2>/dev/null)"
+        [ -n "$bpaths" ] || { warn "bundle $bn: no skills listed in $bjson"; bok=; }
+        for bp in $bpaths; do link_skill "$bd" "$bp" || bok=; done
+    fi
+    for bp in "$@"; do link_skill "$bd" "$bp" || bok=; done
+    [ -n "$bok" ] && echo "bundle $bn $bd" >> "$state"
+    return 0
+}
+{{- range .codex.skill_bundles }}
+{{- $v := index . "version" | default (index $.versions .name) | default "" }}
+{{- if and (contains "{version}" .ref) (not (index $.versions .name)) }}
+{{- /* no retry marker: bin/update locks a version, which changes this script */}}
+echo {{ printf "warning: %s: no locked version; skipped (run bin/update)" .name | squote }} >&2
+{{- else }}
+{{- $dir := printf "%s-%s" .bundle ($v | default (trunc 12 .ref)) }}
+bundle {{ .name | squote }} {{ $dir | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ index . "skills_dir" | default "" | squote }} {{ index . "skills_json" | default "" | squote }}
+{{- range (index . "skills" | default list) }} {{ . | squote }}{{ end }}
+{{- end }}
+{{- end }}
+
+# Expected skills for Doctor (65-codex): "bundle <name> <dir>" and "skill <dir>" lines.
+cat "$state" > "$B/.devenv-skills" || warn "cannot write $B/.devenv-skills"
+rm -f "$state"
+done_or_retry
+{{- end }}

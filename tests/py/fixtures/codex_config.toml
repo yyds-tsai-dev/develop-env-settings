@@ -1,0 +1,85 @@
+model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 400000
+model_reasoning_effort = "medium"
+approvals_reviewer = "user"
+service_tier = "default"
+
+[mcp_servers.codebase-memory-mcp]
+tool_timeout_sec = 120
+command = "/home/someone/.local/bin/codebase-memory-mcp"
+env_vars = ["CBM_CACHE_DIR", "CBM_RUNTIME_DIR"]
+
+[mcp_servers.codebase-memory-mcp.tools.index_status]
+approval_mode = "approve"
+
+[mcp_servers.semble]
+tool_timeout_sec = 120
+command = "/home/someone/.local/bin/uvx"
+args = ["--from", "semble[mcp]==0.5.5", "semble"]
+
+[mcp_servers.drawio]
+tool_timeout_sec = 120
+command = "/home/someone/.local/bin/npx"
+args = ["-y", "@next-ai-drawio/mcp-server@0.2.3"]
+
+[mcp_servers.graphify]
+tool_timeout_sec = 120
+command = "/home/someone/.local/bin/graphify-mcp"
+
+[mcp_servers.paper-search]
+tool_timeout_sec = 120
+command = "/home/someone/.local/bin/paper-search-mcp"
+# <<< codebase-memory-mcp MCP <<<
+# >>> codebase-memory-mcp SessionStart >>>
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "'/home/someone/.local/bin/codebase-memory-mcp' hook-augment"
+command_windows = "& '/home/someone/.local/bin/codebase-memory-mcp' hook-augment"
+timeout = 5
+
+[[hooks.SubagentStart]]
+matcher = "*"
+
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "'/home/someone/.local/bin/codebase-memory-mcp' hook-augment"
+command_windows = "& '/home/someone/.local/bin/codebase-memory-mcp' hook-augment"
+timeout = 5
+
+[hooks.state]
+
+[hooks.state."/home/someone/.codex/config.toml:session_start:0:0"]
+trusted_hash = "sha256:0000"
+
+[hooks.state."/home/someone/.codex/config.toml:subagent_start:0:0"]
+trusted_hash = "sha256:0000"
+
+[hooks.state."/home/someone/project-b/.codex/hooks.json:pre_tool_use:0:0"]
+trusted_hash = "sha256:0000"
+enabled = false
+
+[projects."/home/someone/project-b"]
+trust_level = "trusted"
+
+[projects."/home/someone/project-a"]
+trust_level = "trusted"
+
+[tui]
+status_line = ["model-with-reasoning", "permissions", "weekly-limit", "context-window-size", "context-used", "thread-name"]
+status_line_use_colors = true
+screen_reader_detection_done = true
+
+[tui.model_availability_nux]
+gpt-6-astra = 4
+
+[marketplaces.openai-bundled]
+source_type = "local"
+source = "/home/someone/.codex/.tmp/bundled-marketplaces/openai-bundled"
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+# <<< codebase-memory-mcp SessionStart <<<

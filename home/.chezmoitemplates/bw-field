@@ -1,0 +1,52 @@
+{{- /*
+bw-field: returns one Secret field from the Bitwarden folder develop-env-settings.
+Input: dict with item (item name) and field (custom field name, or notes /
+username / password); .chezmoi must be passed as "chezmoi" (see bw-unlocked
+callers: use `dict "chezmoi" .chezmoi ...`).
+Silent: returns an empty string when bw is missing, locked, failing, or the
+item/field does not exist. Skipping and warning is done by bw-ready, called
+from .chezmoiignore, so an existing target file is left untouched.
+bw runs through sh, or through pwsh (else powershell) on Windows.
+*/ -}}
+{{- $value := "" -}}
+{{- if includeTemplate "bw-unlocked" . -}}
+{{-   $win := eq .chezmoi.os "windows" -}}
+{{-   $ps := "powershell" -}}
+{{-   if lookPath "pwsh" -}}{{- $ps = "pwsh" -}}{{- end -}}
+{{- /* Windows: PowerShell runs bw (UTF-8 output, '[]' when it fails or prints nothing). */ -}}
+{{-   $psWrap := "[Console]::OutputEncoding = [Text.Encoding]::UTF8; try { $o = (%s 2>$null) -join [char]10 } catch { $o = '' }; if ($o) { $o } else { '[]' }; exit 0" -}}
+{{-   $folderId := "" -}}
+{{-   $folders := "" -}}
+{{-   if $win -}}
+{{-     $folders = output $ps "-NoProfile" "-NonInteractive" "-Command" (printf $psWrap "bw list folders --search develop-env-settings") -}}
+{{-   else -}}
+{{-     $folders = output "sh" "-c" "bw list folders --search develop-env-settings 2>/dev/null || echo '[]'" -}}
+{{-   end -}}
+{{-   range ($folders | fromJson) -}}
+{{-     if eq .name "develop-env-settings" -}}{{- $folderId = .id -}}{{- end -}}
+{{-   end -}}
+{{-   if $folderId -}}
+{{-     $items := "" -}}
+{{-     if $win -}}
+{{-       $items = output $ps "-NoProfile" "-NonInteractive" "-Command" (printf $psWrap (printf "bw list items --folderid '%s' --search '%s'" (replace "'" "''" $folderId) (replace "'" "''" .item))) -}}
+{{-     else -}}
+{{-       $items = output "sh" "-c" "bw list items --folderid \"$1\" --search \"$2\" 2>/dev/null || echo '[]'" "sh" $folderId .item -}}
+{{-     end -}}
+{{-     range ($items | fromJson) -}}
+{{-       if eq .name $.item -}}
+{{-         if eq $.field "notes" -}}
+{{-           $value = .notes | default "" -}}
+{{-         else if eq $.field "username" -}}
+{{-           $value = (.login | default dict).username | default "" -}}
+{{-         else if eq $.field "password" -}}
+{{-           $value = (.login | default dict).password | default "" -}}
+{{-         else -}}
+{{-           range (.fields | default list) -}}
+{{-             if eq .name $.field -}}{{- $value = .value | default "" -}}{{- end -}}
+{{-           end -}}
+{{-         end -}}
+{{-       end -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+{{- $value -}}

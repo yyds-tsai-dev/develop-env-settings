@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Update: discard the local Version lock (every resolve rewrites it, so a pull
+# would conflict), pull the source repo without applying, then run Bootstrap,
+# which re-inits, resolves, backs up, applies and runs Doctor.
+# Usage: bin/update [--ci]   (--ci is passed through to bootstrap.sh)
+set -u
+PATH="$HOME/.local/bin:$PATH"; export PATH
+for a in "$@"; do [ "$a" = --ci ] && export CI=true; done
+
+wt="$(chezmoi execute-template '{{ .chezmoi.workingTree }}')" \
+  || { echo "error: chezmoi is not initialised; run bootstrap.sh first" >&2; exit 1; }
+git -C "$wt" checkout -- home/.chezmoidata/versions.yaml || exit 1
+if [ -n "${CI:-}" ]; then
+  chezmoi update --apply=false --no-tty || exit 1
+else
+  chezmoi update --apply=false || exit 1
+fi
+exec sh "$wt/bootstrap.sh" "$@"

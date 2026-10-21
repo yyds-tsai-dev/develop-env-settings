@@ -1,0 +1,72 @@
+{{- if and .isDesktop (eq .chezmoi.os "darwin") -}}
+#!/bin/sh
+# macOS Desktop: WezTerm and VS Code (Homebrew casks into ~/Applications), git
+# and gh (Homebrew), and JetBrainsMono Nerd Font (latest Nerd Fonts release)
+# into ~/Library/Fonts. No admin rights: what needs them (installing Homebrew,
+# the Command Line Tools) is printed as commands at the end. Already installed
+# pieces are skipped. Warns and exits 0 on any failure; never aborts apply.
+# The brew marker changes when Homebrew is installed, and a failed brew install
+# or font download leaves a retry marker with a fresh nonce, so the next apply
+# (bin/update) reruns this after every failure; a clean run removes it.
+# brew: {{ if stat "/opt/homebrew/bin/brew" }}present{{ else }}{{ if stat "/usr/local/bin/brew" }}present{{ else }}absent{{ end }}{{ end }}
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "70-desktop") }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
+warn() { echo "warning: $*" >&2; }
+ADMIN=
+{{ template "retry-sh" "70-desktop" }}
+FAILED=
+# fail MSG: a download or install failed; the next apply retries.
+fail() { warn "$*"; FAILED=1; }
+
+BREW="$(command -v brew 2>/dev/null)"
+if [ -z "$BREW" ]; then
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        [ -x "$b" ] && { BREW="$b"; break; }
+    done
+fi
+
+if [ -n "$BREW" ]; then
+    for f in git gh; do
+        "$BREW" list --formula "$f" >/dev/null 2>&1 \
+            || "$BREW" install "$f" || fail "brew install $f failed (bin/update retries)"
+    done
+    mkdir -p "$HOME/Applications"
+    for c in wezterm visual-studio-code; do
+        "$BREW" list --cask "$c" >/dev/null 2>&1 \
+            || "$BREW" install --cask --appdir="$HOME/Applications" "$c" \
+            || fail "brew install --cask $c failed (bin/update retries)"
+    done
+else
+    warn "Homebrew not found; skipping WezTerm, VS Code, git and gh"
+    ADMIN="$ADMIN
+  /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+fi
+
+if ! git --version >/dev/null 2>&1; then
+    ADMIN="$ADMIN
+  xcode-select --install"
+fi
+
+# --- JetBrainsMono Nerd Font (user font dir) ---
+FONTS="$HOME/Library/Fonts"
+if [ ! -f "$FONTS/JetBrainsMonoNerdFont-Regular.ttf" ]; then
+    tmp="$(mktemp -d)"
+    if curl -fsSL --retry 3 -o "$tmp/font.zip" \
+        "https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip" \
+       && unzip -q -o "$tmp/font.zip" 'JetBrainsMonoNerdFont-*.ttf' -d "$tmp/x"; then
+        mkdir -p "$FONTS"
+        cp "$tmp"/x/JetBrainsMonoNerdFont-*.ttf "$FONTS/" || fail "could not copy the Nerd Font into $FONTS"
+    else
+        fail "could not download JetBrainsMono Nerd Font (bin/update retries)"
+    fi
+    rm -rf "$tmp"
+fi
+
+if [ -n "$ADMIN" ]; then
+    echo "These steps need admin rights; run them yourself, then apply again:$ADMIN"
+fi
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
+exit 0
+{{- end }}

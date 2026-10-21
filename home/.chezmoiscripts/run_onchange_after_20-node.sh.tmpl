@@ -1,0 +1,70 @@
+{{- if or (and .isServer (eq .chezmoi.os "linux")) (eq .chezmoi.os "darwin") -}}
+#!/bin/sh
+# Linux Server and every macOS role (npm for the Bitwarden CLI, 25-bw).
+# Installs fnm (locked version) into ~/.local/bin, then Node {{ .node.major }} as the
+# fnm default. Old Node installs (~/.nvm, ~/.local/node-v*) are left alone;
+# bin/cleanup removes them. Never aborts apply.
+# fnm ships only a .zip and the Server has no unzip, so uv's Python extracts it.
+# A failed download or install leaves a retry marker with a fresh nonce, so the
+# next apply (bin/update) reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "20-node") }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+FNM="$HOME/.local/bin/fnm"
+FNM_VERSION="{{ index .versions "fnm" }}"
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "20-node" }}
+# fail MSG: a download or install failed; the next apply retries.
+fail() { warn "$*"; FAILED=1; }
+FAILED=
+
+if [ "$("$FNM" --version 2>/dev/null)" != "fnm $FNM_VERSION" ]; then
+    tmp="$(mktemp -d)"
+    url="https://github.com/Schniz/fnm/releases/download/v$FNM_VERSION/fnm-{{ if eq .chezmoi.os "darwin" }}macos{{ else }}linux{{ end }}.zip"
+    if curl -fsSL --retry 3 -o "$tmp/fnm.zip" "$url"; then
+        if command -v unzip >/dev/null 2>&1; then
+            unzip -q -o "$tmp/fnm.zip" -d "$tmp/x"
+        else
+            uv run --no-project --python 3.12 -- python -I -c \
+                'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' \
+                "$tmp/fnm.zip" "$tmp/x"
+        fi
+        if [ -f "$tmp/x/fnm" ]; then
+            mkdir -p "$HOME/.local/bin"
+            chmod 0755 "$tmp/x/fnm" && mv -f "$tmp/x/fnm" "$FNM"
+        else
+            fail "could not extract fnm $FNM_VERSION"
+        fi
+    else
+        fail "could not download fnm $FNM_VERSION"
+    fi
+    rm -rf "$tmp"
+fi
+[ -x "$FNM" ] || { warn "fnm missing; skipping Node (bin/update retries)"; retry_mark; exit 0; }
+
+fnm install {{ .node.major }} || { warn "fnm install {{ .node.major }} failed (bin/update retries)"; retry_mark; exit 0; }
+fnm default {{ .node.major }} || fail "fnm default {{ .node.major }} failed"
+
+# Link the default Node's node/npm/npx/corepack into ~/.local/bin so
+# non-interactive processes (Claude Code MCP servers via npx) find them ahead of
+# any system Node. Links go through fnm's `default` alias when it exists, so
+# they follow `fnm default`. An existing regular file is never replaced.
+bin="$(fnm exec --using=default -- sh -c 'dirname "$(command -v node)"' 2>/dev/null)"
+if [ -n "$bin" ] && [ -x "$bin/node" ]; then
+    alias_bin="${bin%%/node-versions/*}/aliases/default/bin"
+    [ -x "$alias_bin/node" ] && bin="$alias_bin"
+    for t in node npm npx corepack; do
+        [ -e "$bin/$t" ] || continue
+        if [ -e "$HOME/.local/bin/$t" ] && [ ! -L "$HOME/.local/bin/$t" ]; then
+            warn "$HOME/.local/bin/$t is a regular file; not replacing it with a link to fnm's $t"
+            continue
+        fi
+        ln -sfn "$bin/$t" "$HOME/.local/bin/$t"
+    done
+else
+    warn "fnm has no default Node; node/npm/npx not linked into ~/.local/bin"
+fi
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
+exit 0
+{{- end }}

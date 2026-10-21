@@ -1,0 +1,30 @@
+{{- /* chezmoi:modify-template */ -}}
+{{- /* macOS only (see .chezmoiignore). Existing content is kept byte for byte; one managed block is replaced or appended at the end, and the file is created when absent (zsh is the macOS login shell). */ -}}
+{{- $in := .chezmoi.stdin -}}
+{{- $block := `# >>> develop-env >>>
+# Managed by develop-env-settings; edit the repo, not this block.
+# Homebrew, then fnm, then ~/.local/bin first exactly once.
+if [ -x /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -x /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+path=("$HOME/.local/bin" ${path:#$HOME/.local/bin})
+if command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --use-on-cd --shell zsh 2>/dev/null)"
+fi
+path=("$HOME/.local/bin" ${path:#$HOME/.local/bin})
+export PATH
+# Start fish only for an interactive terminal without a -c command, when fish exists.
+if [[ -o interactive ]] \
+    && [[ -t 0 && -t 1 ]] \
+    && [[ -z ${ZSH_EXECUTION_STRING:-} ]] \
+    && [[ -z ${FISH_VERSION:-} ]] \
+    && command -v fish >/dev/null 2>&1; then
+    exec fish
+fi
+# <<< develop-env <<<
+` -}}
+{{- $in = regexReplaceAll "(?s)# >>> develop-env >>>\n.*?# <<< develop-env <<<\n" $in "" -}}
+{{- if and $in (not (hasSuffix "\n" $in)) }}{{ $in = printf "%s\n" $in }}{{ end -}}
+{{- print $in $block -}}

@@ -1,0 +1,39 @@
+{{- if and .isServer .isDesktop (eq .chezmoi.os "darwin") -}}
+#!/bin/sh
+# macOS Desktop + Server: the manifest cli_tools for darwin through Homebrew
+# (latest formulae; Homebrew does not pin). Runs before fish plugins (20), Node
+# (20-node), uv tools (30), Claude Code (50) and Codex (55), which then run from
+# the same scripts as on a Linux Server. Warns and exits 0 on any failure.
+# Without Homebrew it does nothing; the marker below changes when Homebrew is
+# installed, so the next apply (bin/update) reruns it. A failed brew install
+# leaves a retry marker with a fresh nonce, so the next apply reruns it after
+# every failure; a clean run removes it.
+# brew: {{ if stat "/opt/homebrew/bin/brew" }}present{{ else }}{{ if stat "/usr/local/bin/brew" }}present{{ else }}absent{{ end }}{{ end }}
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "12-mac-cli-tools") }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "12-mac-cli-tools" }}
+FAILED=
+
+BREW="$(command -v brew 2>/dev/null)"
+if [ -z "$BREW" ]; then
+    for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+        [ -x "$b" ] && { BREW="$b"; break; }
+    done
+fi
+[ -n "$BREW" ] || { warn "Homebrew not found; skipping cli_tools (70-desktop prints the install command; bin/update reruns this once Homebrew exists)"; exit 0; }
+
+brew_formula() {
+    "$BREW" list --formula "$1" >/dev/null 2>&1 && return 0
+    "$BREW" install "$1" || { warn "brew install $1 failed (bin/update retries)"; FAILED=1; }
+}
+{{  range .cli_tools }}
+{{- if or (not (hasKey . "platforms")) (has "darwin" .platforms) }}
+brew_formula {{ get . "brew" | default .name }}
+{{- end }}
+{{- end }}
+if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
+exit 0
+{{- end }}

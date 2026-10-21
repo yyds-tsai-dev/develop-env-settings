@@ -1,0 +1,42 @@
+{{- /* Server-only paths are ignored unless .isServer (a plain Desktop gets no Claude Code or Codex); Desktop-only unless .isDesktop; ~/.zshrc is macOS only. */ -}}
+README.md
+{{ if not .isServer }}
+.ssh/authorized_keys
+.config/fish
+.config/git
+.tmux.conf
+.condarc
+.bashrc
+.tcshrc
+.cshrc
+.codex
+.claude
+.config/paper-search-mcp
+{{ end }}
+{{ if ne .chezmoi.os "darwin" }}
+.zshrc
+{{ end }}
+{{ if not .isDesktop }}
+.config/desktop
+.wezterm.lua
+.ssh/config
+{{ end }}
+
+{{- /* Secret-bearing targets: skipped (existing files stay untouched) unless bw-ready. One entry per target. */ -}}
+{{ if .isServer }}
+{{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".config/paper-search-mcp/.env" "item" "paper-search" "fields" (list "ieee_api_key" "unpaywall_email"))) }}
+.config/paper-search-mcp/.env
+{{   end }}
+{{ end }}
+{{ if .isDesktop }}
+{{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
+.ssh/config
+{{   end }}
+{{- /* .wezterm.lua always renders on first install (ssh_domains = {} when locked);
+an existing one keeps its domains while the vault is not ready. */ -}}
+{{   if stat (joinPath .chezmoi.destDir ".wezterm.lua") }}
+{{     if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".wezterm.lua" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
+.wezterm.lua
+{{     end }}
+{{   end }}
+{{ end }}

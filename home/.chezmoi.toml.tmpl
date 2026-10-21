@@ -1,0 +1,43 @@
+{{- /* Prompt text must be exactly "role" so --promptChoice role=... matches. */ -}}
+{{- $role := promptChoiceOnce . "role" "role" (list "server" "desktop" "desktop+server") -}}
+{{- $os := .chezmoi.os -}}
+{{- if not (has $role (list "server" "desktop" "desktop+server")) -}}
+{{-   fail (printf "unknown role %q" $role) -}}
+{{- end -}}
+{{- if and (eq $role "server") (ne $os "linux") -}}
+{{-   fail "server role needs linux" -}}
+{{- end -}}
+{{- if and (eq $role "desktop") (not (or (eq $os "windows") (eq $os "darwin"))) -}}
+{{-   fail "desktop role needs windows or darwin" -}}
+{{- end -}}
+{{- if and (eq $role "desktop+server") (ne $os "darwin") -}}
+{{-   fail "desktop+server role needs darwin" -}}
+{{- end -}}
+{{- $ci := eq (env "CI") "true" -}}
+{{- $fstype := "" -}}
+{{- if eq $os "linux" -}}
+{{-   if and $ci (env "DEVENV_FAKE_FSTYPE") -}}
+{{-     $fstype = env "DEVENV_FAKE_FSTYPE" -}}
+{{-   else if lookPath "stat" -}}
+{{-     $fstype = output "stat" "-f" "-c" "%T" .chezmoi.homeDir | trim -}}
+{{-   end -}}
+{{- end -}}
+{{- $hold := false -}}
+{{- if stat (joinPath .chezmoi.homeDir ".config" "develop-env" "hold") -}}
+{{-   $hold = true -}}
+{{- end -}}
+{{- $sharedHome := and (eq $os "linux") (or (eq $fstype "nfs") (eq $fstype "nfs4")) -}}
+[data]
+    role = {{ $role | quote }}
+    isServer = {{ or (eq $role "server") (eq $role "desktop+server") }}
+    isDesktop = {{ or (eq $role "desktop") (eq $role "desktop+server") }}
+    sharedHome = {{ $sharedHome }}
+    ci = {{ $ci }}
+    hold = {{ $hold }}
+{{- if eq $os "windows" }}
+# chezmoi runs .ps1 scripts with Windows PowerShell; Bypass applies to that
+# process only (no admin, the machine policy is unchanged).
+[interpreters.ps1]
+    command = "powershell"
+    args = ["-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass"]
+{{- end }}

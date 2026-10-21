@@ -1,0 +1,106 @@
+# What to install. Every entry's `name` is unique across this file and is its key in versions.yaml.
+# source: pypi:<pkg> | npm:<pkg> | github:<owner>/<repo> (latest release) |
+#         github-head:<owner>/<repo>[@branch] (branch head, 12-char SHA) | conda-forge:<pkg> | none
+# cli_tools brew: the Homebrew formula when it differs from name (macOS Desktop + Server).
+cli_tools:
+  - { name: fish, source: "conda-forge:fish", winget: null, platforms: [linux, darwin] }
+  - { name: tmux, source: "conda-forge:tmux", platforms: [linux, darwin] }
+  - { name: fzf, source: "conda-forge:fzf", winget: junegunn.fzf }
+  - { name: fd-find, source: "conda-forge:fd-find", winget: sharkdp.fd, brew: fd }
+  - { name: bat, source: "conda-forge:bat", winget: sharkdp.bat }
+  - { name: ripgrep, source: "conda-forge:ripgrep", winget: BurntSushi.ripgrep.MSVC }
+  - { name: jq, source: "conda-forge:jq", winget: jqlang.jq }
+  - { name: gh, source: "conda-forge:gh", winget: GitHub.cli }
+  - { name: git-lfs, source: "conda-forge:git-lfs", winget: GitHub.GitLFS }
+pdftools:
+  - { name: poppler, source: "conda-forge:poppler", winget: null }
+uv_tools:
+  - { name: semble, source: "pypi:semble", spec: "semble[mcp]" }
+  - { name: graphifyy, source: "pypi:graphifyy", spec: "graphifyy[mcp]" }
+  - { name: paper-search-mcp, source: "pypi:paper-search-mcp", spec: "paper-search-mcp" }
+node: { major: 24 }
+mcp:
+  - name: mcp-semble
+    source: "pypi:semble"
+    command: uvx
+    args: ["--python", "3.12", "--from", "semble[mcp]=={version}", "semble"]   # 3.12: the newest CPython lacks wheels and the Server has no C compiler
+    clients: [claude, codex]
+  - name: mcp-codebase-memory-mcp
+    source: none   # version follows the codebase-memory-mcp installer
+    command: codebase-memory-mcp
+    args: []
+    clients: [claude, codex]
+    codex_env_vars: [CBM_CACHE_DIR, CBM_RUNTIME_DIR]
+    codex_approve_tools: [index_status]   # tools Codex runs without asking
+  - name: mcp-drawio
+    source: "npm:@next-ai-drawio/mcp-server"
+    command: npx
+    args: ["-y", "@next-ai-drawio/mcp-server@{version}"]
+    clients: [claude, codex]
+  - name: mcp-graphify
+    source: none   # version follows the graphifyy uv tool
+    command: graphify-mcp
+    args: []
+    clients: [codex]
+  - name: mcp-paper-search
+    source: none   # version follows the paper-search-mcp uv tool
+    command: paper-search-mcp
+    args: []
+    clients: [codex]
+claude:
+  marketplaces:
+    - { name: claude-plugins-official, source: none, repo: anthropics/claude-plugins-official, builtin: true }
+    - { name: caveman, source: none, repo: JuliusBrussee/caveman }
+    - { name: adhd, source: none, repo: UditAkhourii/adhd }
+    - { name: academic-research-skills, source: none, repo: Imbad0202/academic-research-skills }
+    - { name: drawio, source: none, repo: jgraph/drawio-mcp }
+    - { name: openai-codex, source: none, repo: openai/codex-plugin-cc }
+  plugins:
+    - { name: "superpowers@claude-plugins-official", source: none, marketplace: claude-plugins-official }
+    - { name: "mattpocock-skills@claude-plugins-official", source: none, marketplace: claude-plugins-official }
+    - { name: "caveman@caveman", source: none, marketplace: caveman }
+    - { name: "adhd@adhd", source: none, marketplace: adhd }
+    - { name: "academic-research-skills@academic-research-skills", source: none, marketplace: academic-research-skills }
+    - { name: "drawio@drawio", source: none, marketplace: drawio }
+    - { name: "codex@openai-codex", source: none, marketplace: openai-codex }
+  # Third-party Claude skills, reinstalled from upstream into ~/.claude/skills/<dir>/ (own skills
+  # with no upstream are vendored under home/dot_claude/skills/; there are none today).
+  # url: fetched as SKILL.md; {ref} is v<version> (lock key `version_from`, default `name`), or main.
+  # installer: written by that tool's own installer, nothing fetched here.
+  # codex: true also fetches the same url into ~/.codex/skills/<dir>/.
+  skills:
+    - { name: skill-find-skills, source: "github:vercel-labs/skills", dir: find-skills, codex: true, url: "https://raw.githubusercontent.com/vercel-labs/skills/{ref}/skills/find-skills/SKILL.md" }
+    - { name: skill-paper-search, source: none, dir: paper-search, version_from: paper-search-mcp, codex: true, url: "https://raw.githubusercontent.com/openags/paper-search-mcp/{ref}/claude-code/SKILL.md" }
+    - { name: skill-graphify, source: none, dir: graphify, installer: graphify }   # `graphify install` (graphifyy uv tool)
+    - { name: skill-codebase-memory, source: none, dir: codebase-memory, installer: codebase-memory-mcp }
+codex:
+  # Codex skill bundles: the repo tarball at `ref` ({version} is the lock value) is
+  # unpacked into ~/.codex/skill-bundles/<bundle>-<version>/ and each skill is a
+  # relative symlink ~/.codex/skills/<basename> -> ../skill-bundles/<bundle>-<version>/<path>.
+  # Which skills: `skills_dir` (each child dir holding a SKILL.md), `skills_json`
+  # (the "skills" list of that plugin.json) or `skills` (explicit paths).
+  # Releases resolve with github:, repos without releases with github-head: (the
+  # default-branch head, the same thing Claude's marketplace installs), so
+  # bin/update moves both clients together. claude_plugin + plugin_json: Doctor
+  # warns when this bundle's plugin.json version differs from Claude's installed
+  # plugin. The person's own skill codex-queue-workflow is vendored under
+  # home/private_dot_codex/skills/.
+  skill_bundles:
+    # the Claude superpowers plugin has no lock key: this is the superpowers lock for both clients
+    - { name: codex-bundle-superpowers, source: "github:obra/superpowers", bundle: superpowers, repo: obra/superpowers, ref: "v{version}", skills_dir: skills, claude_plugin: "superpowers@claude-plugins-official", plugin_json: .claude-plugin/plugin.json }
+    - { name: codex-bundle-academic-research-skills, source: "github:Imbad0202/academic-research-skills", bundle: academic-research-skills, repo: Imbad0202/academic-research-skills, ref: "v{version}", skills: [academic-paper, academic-paper-reviewer, academic-pipeline, deep-research, sr-screener], claude_plugin: "academic-research-skills@academic-research-skills", plugin_json: .claude-plugin/plugin.json }
+    - { name: codex-bundle-drawio, source: "github-head:jgraph/drawio-mcp", bundle: drawio, repo: jgraph/drawio-mcp, ref: "{version}", skills_dir: plugins/codex/drawio/skills, claude_plugin: "drawio@drawio", plugin_json: plugins/claude-code/.claude-plugin/plugin.json }
+    - { name: codex-bundle-caveman, source: "github-head:JuliusBrussee/caveman", bundle: caveman, repo: JuliusBrussee/caveman, ref: "{version}", skills: [skills/caveman], claude_plugin: "caveman@caveman", plugin_json: .claude-plugin/plugin.json }
+    - { name: codex-bundle-adhd, source: "github-head:UditAkhourii/adhd", bundle: adhd, repo: UditAkhourii/adhd, ref: "{version}", skills: [skills/adhd], claude_plugin: "adhd@adhd", plugin_json: .claude-plugin/plugin.json }
+    - { name: codex-bundle-mattpocock-skills, source: "github-head:mattpocock/skills", bundle: mattpocock-skills, repo: mattpocock/skills, ref: "{version}", skills_json: .claude-plugin/plugin.json, claude_plugin: "mattpocock-skills@claude-plugins-official", plugin_json: .claude-plugin/plugin.json }
+installers:
+  - { name: claude, source: none, kind: native-installer }
+  - { name: codex, source: "github:openai/codex", tag_prefix: "rust-v", kind: standalone-installer }
+  - { name: codebase-memory-mcp, source: "github:DeusData/codebase-memory-mcp", kind: install-script }
+  - { name: fnm, source: "github:Schniz/fnm" }
+  # micromamba tags carry a real build suffix (e.g. 2.9.0-0) and no v prefix; the lock keeps the suffix
+  - { name: micromamba, source: "github:mamba-org/micromamba-releases" }
+  - { name: chezmoi, source: "github:twpayne/chezmoi" }
+  - { name: uv, source: "github:astral-sh/uv" }
+  - { name: bw, source: "npm:@bitwarden/cli" }
+  - { name: statusline, source: "github:yyds-tsai-dev/develop-env-settings", tag_prefix: "statusline-v" }

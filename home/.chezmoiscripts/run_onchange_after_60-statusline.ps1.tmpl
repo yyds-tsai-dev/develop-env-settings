@@ -1,0 +1,52 @@
+{{- /* Server role only (plain Desktops get no Claude Code). Windows has no
+server role (Server use goes through WSL2), so this renders empty today; kept
+for a future Windows server role. */ -}}
+{{- if and .isServer (eq .chezmoi.os "windows") -}}
+{{- $sl := index .versions "statusline" | default "" -}}
+# Installs the Claude Code status line binary to ~/.claude/statusline-bin.exe.
+# Locked release (tag statusline-v<version>): downloads statusline-windows-amd64.exe.
+# No release locked yet: builds statusline/ locally when `go` exists, else warns.
+# Never aborts apply. A failure (the release download, or no binary at the end)
+# leaves a retry marker with a fresh nonce, so the next apply reruns this after
+# every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "60-statusline") }}
+# Lock: statusline={{ $sl }}
+$ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "60-statusline" }}
+$failed = $false
+$version = '{{ $sl }}'
+$srcDir = Join-Path '{{ .chezmoi.sourceDir }}' '../statusline'
+$dest = Join-Path $HOME '.claude/statusline-bin.exe'
+try {
+    New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+    if ($version) {
+        $url = "https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$version/statusline-windows-amd64.exe"
+        try {
+            $tmp = "$dest.tmp"
+            Invoke-WebRequest -UseBasicParsing -TimeoutSec 120 -Uri $url -OutFile $tmp
+            Move-Item -Force $tmp $dest
+            Clear-RetryMarker
+            exit 0
+        } catch {
+            Write-Warning "could not download ${url}: $_"
+            $failed = $true
+        }
+    }
+    if ((Get-Command go -ErrorAction SilentlyContinue) -and (Test-Path (Join-Path $srcDir 'main.go'))) {
+        Push-Location $srcDir
+        try {
+            $env:CGO_ENABLED = '0'
+            & go build -trimpath -ldflags='-s -w' -o $dest .
+            if ($LASTEXITCODE -ne 0) { Write-Warning 'local status line build failed'; $failed = $true }
+        } finally { Pop-Location }
+    } else {
+        Write-Warning 'status line not installed (no release download and no go on PATH)'
+        $failed = $true
+    }
+} catch {
+    Write-Warning "status line install failed: $_"
+    $failed = $true
+}
+if ($failed) { Set-RetryMarker } else { Clear-RetryMarker }
+exit 0
+{{- end }}

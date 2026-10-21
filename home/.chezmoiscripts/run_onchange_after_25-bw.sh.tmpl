@@ -1,0 +1,49 @@
+{{- if and (or .isServer .isDesktop) (ne .chezmoi.os "windows") -}}
+#!/bin/sh
+# Installs the Bitwarden CLI (bw {{ index .versions "bw" }}) with npm through fnm's Node (no sudo).
+# Runs after the Node script (20-node), so it is listed as after_25.
+# Consequence: on the very first apply on a new machine bw is not installed
+# yet when templates render, so Secret files are skipped with a warning. Then
+# run `bw login`, `export BW_SESSION=$(bw unlock --raw)`, `bw sync` and apply again.
+# bw is linked into ~/.local/bin (never over a regular file), where Doctor and
+# chezmoi's lookPath find it without fnm's environment.
+# Warns and exits 0 on any failure; never aborts apply. A failure leaves a retry
+# marker with a fresh nonce, so the next apply (bin/update) reruns this script
+# after every failure; success removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "25-bw") }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+BW_VERSION="{{ index .versions "bw" }}"
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "25-bw" }}
+retry() { warn "$*"; retry_mark; exit 0; }
+
+# Use fnm's default Node (npm global prefix then lives inside fnm's dir).
+if command -v fnm >/dev/null 2>&1; then
+    eval "$(fnm env --shell bash 2>/dev/null)" 2>/dev/null
+    fnm use default >/dev/null 2>&1 || true
+fi
+command -v npm >/dev/null 2>&1 || retry "npm missing; skipping Bitwarden CLI (bin/update retries)"
+
+prefix="$(npm prefix -g 2>/dev/null)"
+nbw="$prefix/bin/bw"
+if [ "$("$nbw" --version 2>/dev/null)" != "$BW_VERSION" ]; then
+    npm install -g "@bitwarden/cli@$BW_VERSION" \
+        || retry "could not install @bitwarden/cli@$BW_VERSION (bin/update retries)"
+fi
+[ -x "$nbw" ] || retry "npm installed no $nbw (bin/update retries)"
+# fnm env points npm at a per-shell symlink dir that fnm removes later: link
+# the real dir, through fnm's `default` alias when there is one (as 20-node does).
+bin="$(cd "$prefix/bin" 2>/dev/null && pwd -P)"
+alias_bin="${bin%%/node-versions/*}/aliases/default/bin"
+[ "$alias_bin" != "$bin/aliases/default/bin" ] && [ -x "$alias_bin/bw" ] && bin="$alias_bin"
+[ -n "$bin" ] && nbw="$bin/bw"
+if [ -e "$HOME/.local/bin/bw" ] && [ ! -L "$HOME/.local/bin/bw" ]; then
+    warn "$HOME/.local/bin/bw is a regular file; not replacing it with a link to npm's bw"
+else
+    mkdir -p "$HOME/.local/bin" && ln -sfn "$nbw" "$HOME/.local/bin/bw"
+fi
+retry_clear
+exit 0
+{{- end }}

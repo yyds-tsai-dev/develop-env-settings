@@ -1,0 +1,43 @@
+# Managed by develop-env-settings
+model = "gpt-6-astra"
+model_context_window = 1000000
+model_auto_compact_token_limit = 400000
+model_reasoning_effort = "medium"
+approvals_reviewer = "user"
+
+[mcp_servers.semble]
+command = "uvx"
+args = ["--python", "3.12", "--from", "semble[mcp]==0.7.0", "semble"]
+tool_timeout_sec = 120
+
+[mcp_servers.codebase-memory-mcp]
+command = "codebase-memory-mcp"
+env_vars = ["CBM_CACHE_DIR", "CBM_RUNTIME_DIR"]
+tool_timeout_sec = 120
+
+[mcp_servers.codebase-memory-mcp.tools.index_status]
+approval_mode = "approve"
+
+[mcp_servers.drawio]
+command = "npx"
+args = ["-y", "@next-ai-drawio/mcp-server@0.4.6"]
+tool_timeout_sec = 120
+
+[[hooks.SessionStart]]
+matcher = "startup|resume|clear|compact"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "codebase-memory-mcp hook-augment"
+timeout = 5
+
+[[hooks.SubagentStart]]
+matcher = "*"
+
+[[hooks.SubagentStart.hooks]]
+type = "command"
+command = "codebase-memory-mcp hook-augment"
+timeout = 5
+
+[tui]
+status_line = ["model-with-reasoning", "permissions", "weekly-limit", "context-window-size", "context-used", "thread-name"]

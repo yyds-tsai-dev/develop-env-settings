@@ -1,0 +1,116 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up tools
+        run: tests/setup-tools.sh
+      # before bats: server-role renders run uv (modify_ authorized_keys)
+      - uses: astral-sh/setup-uv@v5
+      - name: bats
+        # bootstrap.bats and the claude docker test skip themselves off Linux; on ubuntu they run in the docker step below.
+        env:
+          DEVENV_SKIP_DOCKER: ${{ runner.os == 'Linux' && '1' || '' }}
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap tests/bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "bats"
+          exit "$rc"
+      - name: docker server bootstrap
+        if: runner.os == 'Linux'
+        timeout-minutes: 75
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap -T tests/bats/bootstrap.bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "docker server bootstrap"
+          exit "$rc"
+      - name: docker claude install
+        if: runner.os == 'Linux'
+        timeout-minutes: 75
+        run: |
+          set -o pipefail
+          rc=0
+          .tools/bin/bats --tap -T --filter-tags docker tests/bats/claude.bats 2>&1 | tee bats.out || rc=$?
+          [ "$rc" -eq 0 ] || tests/ci-annotate.sh bats.out "docker claude install"
+          exit "$rc"
+      - uses: actions/setup-go@v5
+        if: runner.os == 'Linux'
+        with:
+          go-version-file: statusline/go.mod
+      - name: statusline go
+        if: runner.os == 'Linux'
+        working-directory: statusline
+        run: |
+          go test ./...
+          GOOS=windows GOARCH=amd64 go build ./...
+      - name: pytest
+        run: |
+          if [ -d tests/py ]; then
+            uv run --python 3.12 --with pytest --with pyyaml --with httpx --with tomlkit pytest tests/py -v
+          else
+            echo "no tests/py yet"
+          fi
+
+  # Real Bootstraps on hosted runners; each must end with Doctor reporting no
+  # FAIL (WARN allowed). Failures become ::error annotations (tests/ci-annotate.sh).
+  macos-bootstrap:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: bootstrap desktop+server, then doctor --ci
+        run: |
+          set -o pipefail
+          rc=0
+          sh bootstrap.sh --source "$GITHUB_WORKSPACE" --role desktop+server --ci 2>&1 | tee bootstrap.out || rc=$?
+          PATH="$HOME/.local/bin:$PATH" bin/doctor --ci 2>&1 | tee doctor.out || rc=$?
+          exit "$rc"
+      - name: annotate failures
+        if: failure()
+        run: tests/ci-annotate-bootstrap.sh "macOS bootstrap"
+
+  windows-bootstrap:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: "true"
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      # Windows PowerShell, as the irm | iex one-liner runs; -File so the exit status propagates.
+      - name: bootstrap desktop, then doctor.ps1 -Ci
+        run: |
+          set -o pipefail
+          rc=0
+          powershell -NoProfile -ExecutionPolicy Bypass -File bootstrap.ps1 -Source "$GITHUB_WORKSPACE" -Role desktop -Ci 2>&1 | tee bootstrap.out || rc=$?
+          pwsh -NoProfile -File bin/doctor.ps1 -Ci 2>&1 | tee doctor.out || rc=$?
+          exit "$rc"
+      - name: annotate failures
+        if: failure()
+        run: tests/ci-annotate-bootstrap.sh "Windows bootstrap"

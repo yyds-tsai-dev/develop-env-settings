@@ -1,0 +1,54 @@
+{{- if .isServer -}}
+{{- $sl := index .versions "statusline" | default "" -}}
+#!/bin/sh
+# Installs the Claude Code status line binary to ~/.claude/statusline-bin.
+# Locked release (tag statusline-v<version>): downloads the matching asset.
+# No release locked yet: builds statusline/ locally when `go` exists, else warns.
+# Warns and exits 0 on any failure; never aborts apply. A failure (the release
+# download, or no binary at the end) leaves a retry marker with a fresh nonce,
+# so the next apply (bin/update) reruns this after every failure; a clean run
+# removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "60-statusline") }}
+# Lock: statusline={{ $sl }}
+# Source (a local build reruns when it changes): {{ include "../statusline/main.go" | sha256sum }} {{ include "../statusline/go.mod" | sha256sum }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+SL_VERSION="{{ $sl }}"
+SRC_DIR="{{ .chezmoi.sourceDir }}/../statusline"
+DEST="$HOME/.claude/statusline-bin"
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "60-statusline" }}
+FAILED=
+# finish: record the outcome for the next apply, then exit 0.
+finish() {
+    if [ -n "$FAILED" ]; then retry_mark; else retry_clear; fi
+    exit 0
+}
+
+case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) ASSET=statusline-linux-amd64 ;;
+    Darwin-arm64|Darwin-aarch64) ASSET=statusline-darwin-arm64 ;;
+    *) ASSET= ;;
+esac
+
+mkdir -p "$HOME/.claude" || { warn "cannot create ~/.claude; skipping status line"; FAILED=1; finish; }
+
+if [ -n "$SL_VERSION" ] && [ -n "$ASSET" ]; then
+    url="https://github.com/yyds-tsai-dev/develop-env-settings/releases/download/statusline-v$SL_VERSION/$ASSET"
+    tmp="$DEST.tmp.$$"
+    if curl -fsSL --retry 3 --connect-timeout 15 --max-time 120 -o "$tmp" "$url"; then
+        chmod +x "$tmp" && mv -f "$tmp" "$DEST" && finish
+    fi
+    rm -f "$tmp"
+    warn "could not download $url (bin/update retries)"; FAILED=1
+fi
+
+if command -v go >/dev/null 2>&1 && [ -f "$SRC_DIR/main.go" ]; then
+    (cd "$SRC_DIR" && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$DEST" .) \
+        || { warn "local status line build failed"; FAILED=1; }
+    finish
+fi
+warn "status line not installed (no release download and no go on PATH)"; FAILED=1
+finish
+{{- end }}

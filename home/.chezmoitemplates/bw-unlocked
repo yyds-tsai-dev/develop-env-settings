@@ -1,0 +1,16 @@
+{{- /*
+bw-unlocked: prints "true" when bw is on PATH and `bw status` reports
+"unlocked", otherwise nothing. Never prompts; a bw that fails or prints nothing
+counts as locked.
+*/ -}}
+{{- if lookPath "bw" -}}
+{{-   $out := "" -}}
+{{-   if eq .chezmoi.os "windows" -}}
+{{-     $ps := "powershell" -}}
+{{-     if lookPath "pwsh" -}}{{- $ps = "pwsh" -}}{{- end -}}
+{{-     $out = output $ps "-NoProfile" "-NonInteractive" "-Command" "try { bw status 2>$null } catch { }; exit 0" -}}
+{{-   else -}}
+{{-     $out = output "sh" "-c" "bw status 2>/dev/null || true" -}}
+{{-   end -}}
+{{-   if regexMatch "\"status\":\\s*\"unlocked\"" $out -}}true{{- end -}}
+{{- end -}}

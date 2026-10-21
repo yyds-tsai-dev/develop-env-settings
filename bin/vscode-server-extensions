@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Fallback for remote.SSH.defaultExtensions (applied through Settings Sync):
+# installs the extensions in desktop/vscode/server-extensions.txt into this
+# Server's VS Code server with `code --install-extension`. Works only from a
+# VS Code-connected terminal, where `code` is the server's remote-cli
+# (~/.vscode-server/...); anywhere else it prints why it skipped. An extension
+# already installed (case-insensitive id) is left alone. Always exits 0.
+# Bash 3.2 compatible (macOS).
+set -u
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+LIST="$ROOT/desktop/vscode/server-extensions.txt"
+
+warn() { echo "warning: $*" >&2; }
+
+code_bin="$(command -v code 2>/dev/null || true)"
+case "$code_bin" in
+  */.vscode-server/*) ;;
+  *) echo "vscode-server-extensions: not in a VS Code-connected terminal (no remote-cli code on PATH); skipping"
+     exit 0 ;;
+esac
+[ -r "$LIST" ] || { warn "cannot read $LIST"; exit 0; }
+
+have="$("$code_bin" --list-extensions 2>/dev/null | tr 'A-Z' 'a-z')"
+n=0
+while IFS= read -r id; do
+  id="${id%%#*}"; id="$(printf '%s' "$id" | tr -d '[:space:]')"
+  [ -n "$id" ] || continue
+  lc="$(printf '%s' "$id" | tr 'A-Z' 'a-z')"
+  if printf '%s\n' "$have" | grep -qxF "$lc"; then continue; fi
+  if "$code_bin" --install-extension "$id" >/dev/null 2>&1; then
+    n=$((n + 1))
+  else
+    warn "code --install-extension $id failed"
+  fi
+done < "$LIST"
+echo "vscode-server-extensions: installed $n extension(s)"
+exit 0

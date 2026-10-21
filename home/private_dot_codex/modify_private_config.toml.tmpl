@@ -1,0 +1,21 @@
+#!/bin/sh
+# ~/.codex/config.toml: the managed fragment (.chezmoitemplates/codex-managed.toml)
+# merged into the current file by lib/merge_codex_config.py, which needs tomlkit
+# and so runs under uv. Without uv, or when the merge fails, the current file is
+# printed back unchanged with a warning: config.toml is never truncated.
+PATH="$HOME/.local/bin:$PATH"
+cur="$(mktemp)" && frag="$(mktemp)" && out="$(mktemp)" || { echo "warning: ~/.codex/config.toml left unchanged (mktemp failed)" >&2; exec cat; }
+trap 'rm -f "$cur" "$frag" "$out"' EXIT
+cat > "$cur"
+cat > "$frag" <<'DEVENV_CODEX_MANAGED'
+{{ template "codex-managed.toml" . }}
+DEVENV_CODEX_MANAGED
+if ! command -v uv >/dev/null 2>&1; then
+    echo "warning: uv missing; ~/.codex/config.toml left unchanged (rerun apply after bootstrap installs uv)" >&2
+    cat "$cur"
+elif uv run --quiet --script {{ .chezmoi.workingTree | squote }}/lib/merge_codex_config.py "$frag" < "$cur" > "$out"; then
+    cat "$out"
+else
+    echo "warning: merging the managed Codex config failed; ~/.codex/config.toml left unchanged" >&2
+    cat "$cur"
+fi
