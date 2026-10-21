@@ -147,8 +147,11 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   grep -qF -- 'install -y --skip-binary --clients=claude "--dir=$bin"' "$f"
   grep -qF "\$cbmVersion = '$(lock codebase-memory-mcp)'" "$f"
   grep -qF "\$cl = @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble')" "$f"
-  grep -qF "Set-McpServer 'semble' (Get-McpCommandLine \$cl)" "$f"
-  [ "$(grep -c '^        Invoke-Prewarm \$cl$' "$f")" -eq 1 ]   # uvx (semble) only
+  grep -qF "Set-McpServer 'semble' \$cl" "$f"
+  [ "$(grep -c '^        \$cl = Get-McpCommandLine \$cl$' "$f")" -eq 3 ]
+  [ "$(grep -c '^        Invoke-Prewarm help \$cl$' "$f")" -eq 1 ]    # uvx (semble)
+  [ "$(grep -c '^        Invoke-Prewarm stdin \$cl$' "$f")" -eq 1 ]   # npx (drawio)
+  grep -qF 'try { $p.StandardInput.Close() } catch { }' "$f"
   grep -qF "if (\$src -match '\.(cmd|bat|ps1)\$') { return @('cmd', '/c') + \$CommandLine }" "$f"
   for c in uvx codebase-memory-mcp npx; do
     grep -qF "if (-not (Test-Cmd '$c')) {" "$f" || { echo "no runtime guard for $c"; false; }
@@ -170,7 +173,7 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   sh -n "$SB/claude.sh"
   grep -qF "if ! command -v 'npx' >/dev/null 2>&1; then" "$SB/claude.sh"
   fake_claude
-  rm -f "$STUB/graphify"          # no uv tools on a plain desktop
+  rm -f "$STUB/graphify" "$STUB/npx"   # no uv tools on a plain desktop; no npx here
   stub uvx "echo \"uvx \$*\" >> '$SB/calls'"   # uv comes with Bootstrap; npx is missing here
   HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
   echo "$output"; cat "$SB/calls"
@@ -186,6 +189,14 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   # semble's uvx command was pre-warmed once, before it was registered
   [ "$(grep -cx "uvx --python 3.12 --from semble\[mcp\]==$(lock mcp-semble) semble --help" "$SB/calls")" -eq 1 ]
   [ "$(grep -n 'semble --help' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user semble' "$SB/calls" | cut -d: -f1)" ]
+  # with npx on PATH, drawio is pre-warmed and registered too
+  stub npx "echo \"npx \$*\" >> '$SB/calls'"
+  : > "$SB/calls"
+  HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
+  [ "$status" -eq 0 ]
+  grep -qx "npx -y @next-ai-drawio/mcp-server@$(lock mcp-drawio)" "$SB/calls"
+  grep -qx "mcp add -s user drawio -- npx -y @next-ai-drawio/mcp-server@$(lock mcp-drawio)" "$SB/calls"
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
   # a failed pre-warm is a failure: warning and retry marker
   stub uvx 'exit 1'
   HOME="$SB_HOME" PATH="$STUB:$sys" run sh "$SB/claude.sh"
@@ -209,7 +220,7 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   [ "$(uname -s)" = Linux ] || skip "stub-only PATH needs a linux host"
   sys="$(sys_path)"
   fake_claude
-  rm -f "$STUB/graphify" "$STUB/codebase-memory-mcp"
+  rm -f "$STUB/graphify" "$STUB/codebase-memory-mcp" "$STUB/npx"
   stub uvx 'exit 0'
   for p in $(manifest_plugins); do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
   cat > "$STUB/claude" <<EOF
@@ -356,6 +367,8 @@ EOF
   stub codebase-memory-mcp "echo 'codebase-memory-mcp $(lock codebase-memory-mcp)'"
   # graphify install: writes its skill under $CLAUDE_CONFIG_DIR (and a CLAUDE.md block)
   stub graphify 'mkdir -p "$CLAUDE_CONFIG_DIR/skills/graphify" && echo graphify > "$CLAUDE_CONFIG_DIR/skills/graphify/SKILL.md" && echo "# graphify" > "$CLAUDE_CONFIG_DIR/CLAUDE.md"'
+  # npx: the drawio pre-warm start (never the host's npx)
+  stub npx "echo \"npx \$*\" >> '$SB/calls'"
   # curl -fsSL --retry 3 -o FILE URL: write a fake skill
   stub curl 'while [ $# -gt 1 ]; do [ "$1" = -o ] && { echo "skill from $3" > "$2"; exit 0; }; shift; done; exit 1'
 }
@@ -378,6 +391,9 @@ run_script() {
   ! grep -q 'mcp add -s user semble' "$SB/calls"
   grep -qx 'mcp remove -s user drawio' "$SB/calls"
   grep -qx "mcp add -s user drawio -- npx -y @next-ai-drawio/mcp-server@$(lock mcp-drawio)" "$SB/calls"
+  # drawio is started once (npx caches it) before it is registered; semble is not pre-warmed on a server
+  [ "$(grep -n "^npx -y @next-ai-drawio/mcp-server@$(lock mcp-drawio)\$" "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user drawio' "$SB/calls" | cut -d: -f1)" ]
+  ! grep -q -- '--help' "$SB/calls"
   ! grep -q 'mcp remove -s user codebase-memory-mcp' "$SB/calls"   # not registered yet
   grep -qx 'mcp add -s user codebase-memory-mcp -- codebase-memory-mcp' "$SB/calls"
   # every plugin and marketplace is added; nothing logs in

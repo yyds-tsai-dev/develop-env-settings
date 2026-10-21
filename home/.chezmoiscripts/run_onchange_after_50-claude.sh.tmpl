@@ -9,6 +9,9 @@ Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
 # versions, then re-applies ~/.claude/settings.json because the cbm installer
 # and `claude plugin marketplace add` rewrite it. Never logs in (Doctor checks
 # the login). Warns and exits 0 on any failure; never aborts apply.
+# An npx server (drawio) is started once with stdin closed before it is
+# registered, so npx has the locked package in its cache and the first start
+# fits in Claude's 30 s connect timeout.
 {{- if not .isServer }}
 # A plain Desktop registers only the MCP servers whose command exists there and
 # installs an installer-made skill only when its installer exists; each one it
@@ -32,14 +35,18 @@ warn() { echo "warning: $*" >&2; FAILED=1; }
 {{- if not .isServer }}
 # skipped: a desktop lacks this runtime; not a failure.
 skipped() { echo "warning: $*" >&2; }
-# prewarm COMMAND [ARG]...: run the server command once with --help (15 min
-# cap where `timeout` exists) so uv fetches Python and the package now.
+{{- end }}
+# prewarm help|stdin COMMAND [ARG]...: run the server command once, with --help
+# (uvx: uv fetches Python and the package) or as is with stdin closed (an MCP
+# stdio server exits at end of input; npx caches the package), stdin from
+# /dev/null and a 15 min cap where `timeout` exists.
 prewarm() {
-    if command -v timeout >/dev/null 2>&1; then timeout 900 "$@" --help >/dev/null 2>&1
-    else "$@" --help >/dev/null 2>&1; fi \
+    mode="$1"; shift
+    [ "$mode" = help ] && set -- "$@" --help
+    if command -v timeout >/dev/null 2>&1; then timeout 900 "$@" </dev/null >/dev/null 2>&1
+    else "$@" </dev/null >/dev/null 2>&1; fi \
         || warn "could not pre-fetch the MCP server command: $*"
 }
-{{- end }}
 # done_or_retry: record the outcome for the next apply, then exit 0.
 done_or_retry() {
     if [ -n "$FAILED" ]; then
@@ -161,8 +168,11 @@ if ! command -v {{ .command | squote }} >/dev/null 2>&1; then
     skipped "{{ .command }} not found on this desktop; skipping MCP server {{ trimPrefix "mcp-" .name }}"
 else
 {{- if eq .command "uvx" }}
-prewarm {{ $cl }}
+prewarm help {{ $cl }}
 {{- end }}
+{{- end }}
+{{- if eq .command "npx" }}
+prewarm stdin {{ $cl }}
 {{- end }}
 mcp_server {{ trimPrefix "mcp-" .name | squote }} {{ $cl }}
 {{- if not $.isServer }}

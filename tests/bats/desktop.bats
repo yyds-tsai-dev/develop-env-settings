@@ -519,7 +519,7 @@ STUBEOF
 \$env:PATH = '$STUB' + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
 foreach (\$c in 'npx', 'codebase-memory-mcp', 'graphify') { if (Get-Command \$c -ErrorAction SilentlyContinue) { "SKIPTEST \$c on PATH"; exit 0 } }
 \$env:HOME = '$SB_HOME'
-& pwsh -NoProfile -File '$REPO_ROOT/bin/doctor.ps1' -Ci
+& (Join-Path \$PSHOME 'pwsh') -NoProfile -File '$REPO_ROOT/bin/doctor.ps1' -Ci   # the running pwsh: PATH above has no pwsh dir
 exit \$LASTEXITCODE
 PSEOF
   DEVENV_ROLE=desktop DOCTOR_ONLY='60-*' run pwsh -NoProfile -File "$SB/run.ps1"
@@ -557,6 +557,7 @@ STUBEOF
   printf '#!/bin/sh\necho "codebase-memory-mcp %s"\n' "$(sed -n "s/^  codebase-memory-mcp: *//p" "$REPO_ROOT/home/.chezmoidata/versions.yaml")" > "$STUB/codebase-memory-mcp"
   chmod +x "$STUB/claude" "$STUB/uvx" "$STUB/codebase-memory-mcp"
   echo 'exit 0' > "$STUB/npx.ps1"   # npm's shim, as on a Windows machine with its own Node
+  printf '#!/bin/sh\necho "cmd $*" >> "%s/calls"\nexit 0\n' "$SB" > "$STUB/cmd"; chmod +x "$STUB/cmd"
   # offline: skills come from a stub web request; paths arrive through the environment
   cat > "$SB/run.ps1" <<'PSEOF'
 $env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
@@ -573,6 +574,8 @@ PSEOF
   grep -q '^mcp add -s user semble -- uvx --python 3.12 ' "$SB/calls"
   grep -qx 'mcp add -s user codebase-memory-mcp -- codebase-memory-mcp' "$SB/calls"
   grep -q '^mcp add -s user drawio -- cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls"
+  # drawio started once through cmd /c with an empty stdin, before it is registered
+  [ "$(grep -n '^cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user drawio' "$SB/calls" | cut -d: -f1)" ]
   [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
   [ -s "$SB_HOME/.claude/settings.json" ]
 }

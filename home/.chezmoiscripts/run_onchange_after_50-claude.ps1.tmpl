@@ -14,9 +14,10 @@ of run_onchange_after_50-claude.sh. */ -}}
 # installer-made skill is installed only when its installer exists; each one
 # skipped prints one warning and is not a failure (no retry marker). A server
 # whose command is a .cmd/.ps1 shim (npx from a Node install) is registered as
-# `cmd /c <command> ...`, since Claude Code cannot start a shim directly. A uvx
-# server is run once with --help first (no uv tools here), so the first health
-# check finds uv's cache warm. Any other
+# `cmd /c <command> ...`, since Claude Code cannot start a shim directly. Before
+# registering, a uvx server is run once with --help (no uv tools here) and an
+# npx server once with an empty stdin, so the first start finds the package
+# cached and fits in Claude's 30 s connect timeout. Any other
 # warning leaves a retry marker with a fresh nonce, so the next apply (re-run
 # the bootstrap one-liner) reruns this after every failed run; a clean run
 # removes it.
@@ -189,20 +190,32 @@ if ($claudeOk) {
         if ($src -match '\.(cmd|bat|ps1)$') { return @('cmd', '/c') + $CommandLine }
         return $CommandLine
     }
-    # Invoke-Prewarm COMMAND [ARG]...: run the server command once with --help
-    # (15 min cap) so uv fetches Python and the package now.
-    function Invoke-Prewarm([string[]]$CommandLine) {
-        $out = Join-Path ([IO.Path]::GetTempPath()) ('devenv-prewarm-' + [guid]::NewGuid())
+    # Invoke-Prewarm help|stdin COMMAND [ARG]...: run the server command once,
+    # with --help (uvx: uv fetches Python and the package) or as is with an
+    # empty stdin (an MCP stdio server exits at end of input; npx caches the
+    # package), 15 min cap.
+    function Invoke-Prewarm([string]$Mode, [string[]]$CommandLine) {
+        $argList = @($CommandLine | Select-Object -Skip 1)
+        if ($Mode -eq 'help') { $argList += '--help' }
         try {
-            $p = Start-Process -FilePath (Get-Command $CommandLine[0]).Source -NoNewWindow -PassThru `
-                -ArgumentList (@($CommandLine | Select-Object -Skip 1) + '--help') `
-                -RedirectStandardOutput "$out.out" -RedirectStandardError "$out.err"
+            # System.Diagnostics.Process, not Start-Process: stdin is closed
+            # without writing to it, and ExitCode is reliable on PowerShell 5.1.
+            $psi = New-Object Diagnostics.ProcessStartInfo
+            $psi.FileName = (Get-Command $CommandLine[0] -ErrorAction Stop).Source
+            $psi.Arguments = $argList -join ' '
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardInput = $true
+            $psi.RedirectStandardOutput = $true
+            $psi.RedirectStandardError = $true
+            $p = [Diagnostics.Process]::Start($psi)
+            $p.BeginOutputReadLine(); $p.BeginErrorReadLine()   # discarded
+            try { $p.StandardInput.Close() } catch { }          # it may have exited already
             if (-not $p.WaitForExit(900000)) { $p.Kill(); throw 'timed out after 15 minutes' }
+            $p.WaitForExit()
             if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
         } catch {
             Warn-Step "could not pre-fetch the MCP server command $($CommandLine -join ' '): $_"
         }
-        Remove-Item -Force -ErrorAction SilentlyContinue "$out.out", "$out.err"
     }
 {{- range .mcp }}
 {{- if has "claude" .clients }}
@@ -212,10 +225,13 @@ if ($claudeOk) {
     } else {
         $cl = @({{ .command | squote }}
 {{- range .args }}, {{ if $v }}{{ replace "{version}" $v . | squote }}{{ else }}{{ . | replace "=={version}" "" | replace "@{version}" "@latest" | squote }}{{ end }}{{ end }})
+        $cl = Get-McpCommandLine $cl
 {{- if eq .command "uvx" }}
-        Invoke-Prewarm $cl
+        Invoke-Prewarm help $cl
+{{- else if eq .command "npx" }}
+        Invoke-Prewarm stdin $cl
 {{- end }}
-        Set-McpServer {{ trimPrefix "mcp-" .name | squote }} (Get-McpCommandLine $cl)
+        Set-McpServer {{ trimPrefix "mcp-" .name | squote }} $cl
     }
 {{- end }}
 {{- end }}
