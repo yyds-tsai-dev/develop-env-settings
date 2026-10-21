@@ -37,8 +37,21 @@ function New-TempDir {
 
 $bin = Join-Path $HOME '.local\bin'
 $codexBin = Join-Path $env:LOCALAPPDATA 'Programs\OpenAI\Codex\bin'
-$env:Path = $bin + [IO.Path]::PathSeparator + $codexBin + [IO.Path]::PathSeparator + $env:Path
+# System32 ahead of the rest: install.ps1 and the bundle step call `tar`, and
+# a GNU tar from Git's usr\bin (CI's bash, a Git Bash session) reads C:\... as
+# a remote host; Windows' own tar (bsdtar) handles drive paths.
+$sys32 = Join-Path $env:SystemRoot 'System32'
+$env:Path = (@($bin, $codexBin, $sys32) -join [IO.Path]::PathSeparator) + [IO.Path]::PathSeparator + $env:Path
+$tarExe = Join-Path $sys32 'tar.exe'
+if (-not (Test-Path $tarExe)) { $tarExe = 'tar' }
 Set-Location $HOME
+# Add-UserPath DIR: put DIR on the user PATH once (new sessions; idempotent).
+function Add-UserPath([string]$Dir) {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ((($userPath -split ';') | Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') }).Count -eq 0) {
+        [Environment]::SetEnvironmentVariable('Path', ((@($Dir, $userPath) | Where-Object { $_ }) -join ';'), 'User')
+    }
+}
 
 # --- Codex standalone build (upstream install.ps1 at the locked tag) ---
 $codexVersion = '{{ $codex }}'
@@ -61,6 +74,13 @@ if (-not $have -or ($codexVersion -and $have -ne $codexVersion)) {
     }
     Remove-Item Env:CODEX_NON_INTERACTIVE, Env:CODEX_RELEASE -ErrorAction SilentlyContinue
     Remove-Item -Force -ErrorAction SilentlyContinue $inst
+}
+# The installer's bin dir on this process's PATH (already, above) and on the
+# user PATH (the installer does this too; kept idempotent here).
+if (Test-Path (Join-Path $codexBin 'codex.exe')) {
+    Add-UserPath $codexBin
+} elseif (-not (Test-Cmd 'codex')) {
+    Warn-Step "codex not found after the install (expected $codexBin\codex.exe)"
 }
 
 $SK = Join-Path $HOME '.codex\skills'
@@ -161,7 +181,7 @@ function Get-Bundle([string]$Dir, [string]$Repo, [string]$Ref) {
     try {
         New-Item -ItemType Directory -Force -Path $tmp | Out-Null
         Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri "https://codeload.github.com/$Repo/tar.gz/$Ref" -OutFile $tgz
-        & tar -xzf $tgz -C $tmp --strip-components=1
+        & $tarExe -xzf $tgz -C $tmp --strip-components=1
         if ($LASTEXITCODE -ne 0) { throw "tar exit $LASTEXITCODE" }
         Move-Item $tmp $final
         Remove-Item -Force -ErrorAction SilentlyContinue $tgz
@@ -182,8 +202,9 @@ function Set-SkillLink([string]$Dir, [string]$Path) {
     if (-not (Test-Path (Join-Path $target 'SKILL.md'))) { Warn-Step "bundle $Dir has no skill at $Path"; return $false }
     try {
         if (Test-Junction $dst) {
-            $cur = @((Get-Item -LiteralPath $dst -Force).Target)[0]
-            if ($cur -ne $target) { Remove-Junction $dst }
+            # targets may come back as \\?\C:\...; compare normalised, case-insensitively
+            $cur = "$(@((Get-Item -LiteralPath $dst -Force).Target)[0])" -replace '^\\\\\?\\', ''
+            if (-not $cur.TrimEnd('\').Equals($target.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { Remove-Junction $dst }
         } elseif (Test-Path $dst) {
             $rep = Join-Path $B '.replaced'
             New-Item -ItemType Directory -Force -Path $rep | Out-Null
@@ -239,7 +260,8 @@ try { [IO.File]::WriteAllText((Join-Path $B '.devenv-skills'), (($state -join "`
 # Get-McpCommandLine / Invoke-Prewarm: as in 50-claude.ps1 (shared caches).
 function Get-McpCommandLine([string[]]$CommandLine) {
     $src = (Get-Command $CommandLine[0] -ErrorAction SilentlyContinue).Source
-    if ($src -match '\.(cmd|bat|ps1)$') { return @('cmd', '/c') + $CommandLine }
+    # Windows: anything but an .exe (npx.cmd, a .ps1 shim) runs through cmd /c
+    if ($src -match '\.(cmd|bat|ps1)$' -or ($env:OS -eq 'Windows_NT' -and $src -notmatch '\.exe$')) { return @('cmd', '/c') + $CommandLine }
     return $CommandLine
 }
 function Invoke-Prewarm([string]$Mode, [string[]]$CommandLine) {
@@ -286,13 +308,19 @@ if (-not $uv) {
         $psi.RedirectStandardOutput = $true
         $p = [Diagnostics.Process]::Start($psi)
         $ms = New-Object IO.MemoryStream
-        $p.StandardOutput.BaseStream.CopyTo($ms)
-        $p.WaitForExit()
+        $copy = $p.StandardOutput.BaseStream.CopyToAsync($ms)
+        if (-not $p.WaitForExit(300000)) { $p.Kill(); throw 'uv timed out after 5 minutes' }
+        $p.WaitForExit(); [void]$copy.Wait(60000)
         $new = $ms.ToArray()
         if ($p.ExitCode -ne 0 -or $new.Length -eq 0) { throw "uv exit $($p.ExitCode)" }
         $old = $null
         if (Test-Path $cfg) { $old = [IO.File]::ReadAllBytes($cfg) }
-        if (-not $old -or [Convert]::ToBase64String($old) -ne [Convert]::ToBase64String($new)) { [IO.File]::WriteAllBytes($cfg, $new) }
+        if (-not $old -or [Convert]::ToBase64String($old) -ne [Convert]::ToBase64String($new)) {
+            # temp file + move: a failure never leaves a half-written config
+            $tmpCfg = "$cfg.devenv-$([guid]::NewGuid())"
+            [IO.File]::WriteAllBytes($tmpCfg, $new)
+            Move-Item -Force $tmpCfg $cfg
+        }
     } catch {
         Warn-Step "merging the managed Codex config failed; ~/.codex/config.toml left unchanged: $_"
     }

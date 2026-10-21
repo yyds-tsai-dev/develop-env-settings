@@ -13,8 +13,11 @@ Usage: merge_codex_config.py MANAGED_TOML
   stdin. Input and output are UTF-8 bytes on every OS.
 --desktop: a plain Desktop has only some MCP runtimes: a server whose `command`
   is not on PATH is dropped with one warning (a `url` server is always kept),
-  and on Windows a .cmd/.bat/.ps1 command (npx from a Node install) becomes
-  `cmd /c <command> ...`, which Codex can start.
+  and so is a hook whose command's first word is not on PATH (the
+  codebase-memory-mcp hooks before it is installed; a later merge restores
+  them). On Windows a command that does not resolve to an .exe (npx.cmd from a
+  Node install) becomes `cmd /c <command> ...`, which Codex can start.
+Input may start with a UTF-8 BOM (Windows editors); the output has none.
 --keep-on-error: when the merge or its check fails, warn and print the current
   config unchanged (exit 0), for callers that cannot fall back themselves.
 
@@ -134,9 +137,6 @@ def check(existing, managed, out):
         raise ValueError("merged config lost or changed: " + ", ".join(bad))
 
 
-SHIM_SUFFIXES = (".cmd", ".bat", ".ps1")
-
-
 def desktop_servers(managed, which=None, windows=None):
     """The fragment with only the MCP servers this machine can start (see
     --desktop). Prints one warning per dropped server."""
@@ -155,9 +155,30 @@ def desktop_servers(managed, which=None, windows=None):
         if not found:
             print(f"warning: {cmd} not found on this desktop; skipping Codex MCP server {name}", file=sys.stderr)
             del servers[name]
-        elif windows and found.lower().endswith(SHIM_SUFFIXES):
+        elif windows and not found.lower().endswith(".exe"):
             srv["args"] = ["/c", cmd] + [str(a) for a in srv.get("args", [])]
             srv["command"] = "cmd"
+    hooks = doc.get("hooks")
+    if hooks:
+        for event in list(hooks.keys()):
+            groups = hooks[event]
+            if not isinstance(groups, list):
+                continue
+            for g in list(groups):
+                inner = g.get("hooks") if hasattr(g, "get") else None
+                if not isinstance(inner, list):
+                    continue
+                for h in list(inner):
+                    first = str(h.get("command", "")).split()[:1]
+                    if first and not which(first[0]):
+                        print(f"warning: {first[0]} not found on this desktop; skipping Codex hook {event}: {h['command']}", file=sys.stderr)
+                        inner.remove(h)
+                if not inner:
+                    groups.remove(g)
+            if not groups:
+                del hooks[event]
+        if not hooks:
+            del doc["hooks"]
     return tomlkit.dumps(doc)
 
 
@@ -189,13 +210,15 @@ def main(argv):
         print("usage: merge_codex_config.py [--desktop] [--keep-on-error] "
               "(MANAGED_TOML | --fragment-b64 B64) [--current-file PATH]", file=sys.stderr)
         return 2
-    if cur_file is not None:
-        p = Path(cur_file)
-        current = p.read_bytes().decode("utf-8") if p.exists() else ""
-    else:
-        current = sys.stdin.buffer.read().decode("utf-8")
+    raw = b""
     try:
-        managed = base64.b64decode(b64).decode("utf-8") if b64 is not None else Path(frag).read_bytes().decode("utf-8")
+        if cur_file is not None:
+            p = Path(cur_file)
+            raw = p.read_bytes() if p.exists() else b""
+        else:
+            raw = sys.stdin.buffer.read()
+        current = raw.decode("utf-8-sig")
+        managed = (base64.b64decode(b64) if b64 is not None else Path(frag).read_bytes()).decode("utf-8-sig")
         if desktop:
             managed = desktop_servers(managed)
         out = merge(current, managed)
@@ -203,7 +226,8 @@ def main(argv):
         if not keep:
             raise
         print(f"warning: merging the managed Codex config failed ({e}); ~/.codex/config.toml left unchanged", file=sys.stderr)
-        out = current
+        sys.stdout.buffer.write(raw)
+        return 0
     sys.stdout.buffer.write(out.encode("utf-8"))
     return 0
 

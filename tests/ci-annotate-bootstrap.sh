@@ -10,6 +10,12 @@ tap="$(mktemp)"
   if [ -r bootstrap.out ]; then
     echo "not ok bootstrap output (last 15 lines)"
     tail -n 15 bootstrap.out | tr -d '\r' | sed 's/^/# /'
+    # install-script warnings (e.g. 55-codex.ps1's), which the tail usually misses
+    w="$(tr -d '\r' < bootstrap.out | sed 's/\x1b\[[0-9;]*m//g' | grep -iE '^(warning|WARNING):|^WARNING ' | tail -n 40)"
+    if [ -n "$w" ]; then
+      echo "not ok install script warnings (last 40)"
+      printf '%s\n' "$w" | sed 's/^/# /'
+    fi
   fi
 } > "$tap"
 "$(dirname "$0")/ci-annotate.sh" "$tap" "$1"

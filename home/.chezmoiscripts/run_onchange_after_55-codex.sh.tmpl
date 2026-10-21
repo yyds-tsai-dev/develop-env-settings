@@ -223,7 +223,9 @@ if ! command -v uv >/dev/null 2>&1; then
     warn "uv missing; ~/.codex/config.toml not merged again"
 elif uv run --quiet --script {{ .chezmoi.workingTree | squote }}/lib/merge_codex_config.py --desktop --keep-on-error "$frag" --current-file "$cfg" > "$out"; then
     if [ -s "$out" ] && ! cmp -s "$out" "$cfg"; then
-        (umask 077; cat "$out" > "$cfg") || warn "cannot write $cfg"
+        # temp file + mv: a failure never leaves a half-written config
+        tmpc="$cfg.devenv.$$"
+        { (umask 077; cat "$out" > "$tmpc") && mv -f "$tmpc" "$cfg"; } || { rm -f "$tmpc"; warn "cannot write $cfg"; }
     fi
 else
     warn "merging the managed Codex config failed; ~/.codex/config.toml left unchanged"

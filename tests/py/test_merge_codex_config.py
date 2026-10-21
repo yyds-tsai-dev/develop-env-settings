@@ -228,3 +228,48 @@ def test_keep_on_error_prints_current_unchanged(tmp_path, capsys):
     cap = capsys.readouterr()
     assert cap.out == LIVE
     assert "left unchanged" in cap.err
+
+
+def test_bom_crlf_current_file_merges(tmp_path, capsys):
+    import base64
+    cur = tmp_path / "config.toml"
+    cur.write_bytes(b"\xef\xbb\xbf" + LIVE.replace("\n", "\r\n").encode("utf-8"))
+    b64 = base64.b64encode(b"\xef\xbb\xbf" + MANAGED.encode("utf-8")).decode()
+    assert mcc.main(["m", "--keep-on-error", "--fragment-b64", b64, "--current-file", str(cur)]) == 0
+    cap = capsys.readouterr()
+    assert "failed" not in cap.err
+    out = load(cap.out)
+    assert out["projects"] == load(LIVE)["projects"]
+    assert out["mcp_servers"] == load(MANAGED)["mcp_servers"]
+    assert not cap.out.startswith("\ufeff")
+
+
+def test_keep_on_error_returns_the_original_bytes(tmp_path, capsysbinary):
+    import base64
+    cur = tmp_path / "config.toml"
+    original = b"\xef\xbb\xbfmodel = \"x\"\r\n"
+    cur.write_bytes(original)
+    bad = base64.b64encode(b"[mcp_servers.x]\ncommand = \"y\"\n").decode()
+    assert mcc.main(["m", "--keep-on-error", "--fragment-b64", bad, "--current-file", str(cur)]) == 0
+    assert capsysbinary.readouterr().out == original
+
+
+def test_desktop_drops_hooks_whose_command_is_missing(capsys):
+    have = {"uvx": "/x/uvx"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert "hooks" not in out or not any(
+        "codebase-memory-mcp" in h["command"] for ev in out["hooks"].values() for g in ev for h in g["hooks"])
+    assert "skipping Codex hook SessionStart" in capsys.readouterr().err
+    # with codebase-memory-mcp present the hooks stay
+    have["codebase-memory-mcp"] = "/x/codebase-memory-mcp"
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert [h["command"] for g in out["hooks"]["SessionStart"] for h in g["hooks"]] == ["codebase-memory-mcp hook-augment"]
+    # and the dropped form still merges and passes the check
+    mcc.merge(LIVE, mcc.desktop_servers(MANAGED, which={"uvx": "/x/uvx"}.get, windows=False))
+
+
+def test_desktop_windows_non_exe_runs_through_cmd():
+    have = {"uvx": r"C:\u\uvx.exe", "codebase-memory-mcp": r"C:\u\codebase-memory-mcp.exe", "npx": r"C:\n\npx.COM"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=True))
+    assert out["mcp_servers"]["drawio"]["command"] == "cmd"
+    assert out["mcp_servers"]["semble"]["command"] == "uvx"

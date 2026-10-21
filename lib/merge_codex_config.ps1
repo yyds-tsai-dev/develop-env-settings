@@ -6,6 +6,7 @@
 # Usage: merge_codex_config.ps1 MERGE_PY FRAGMENT_B64 CURRENT_FILE
 param([string]$MergePy, [string]$FragmentB64, [string]$Current)
 $ErrorActionPreference = 'Continue'
+$env:Path = (Join-Path $HOME '.local\bin') + [IO.Path]::PathSeparator + $env:Path
 $stdout = [Console]::OpenStandardOutput()
 function Write-Current {
     if (Test-Path -LiteralPath $Current) {
@@ -28,8 +29,9 @@ try {
     $psi.RedirectStandardOutput = $true
     $p = [Diagnostics.Process]::Start($psi)
     $ms = New-Object IO.MemoryStream
-    $p.StandardOutput.BaseStream.CopyTo($ms)
-    $p.WaitForExit()
+    $copy = $p.StandardOutput.BaseStream.CopyToAsync($ms)
+    if (-not $p.WaitForExit(300000)) { $p.Kill(); throw 'uv timed out after 5 minutes' }
+    $p.WaitForExit(); [void]$copy.Wait(60000)
     if ($p.ExitCode -eq 0 -and $ms.Length -gt 0) {
         $ms.WriteTo($stdout)
         $stdout.Flush()

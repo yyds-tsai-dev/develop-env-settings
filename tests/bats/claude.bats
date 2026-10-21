@@ -150,7 +150,7 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
   [ "$(grep -c '^        Invoke-Prewarm help \$cl$' "$f")" -eq 1 ]    # uvx (semble)
   [ "$(grep -c '^        Invoke-Prewarm stdin \$cl$' "$f")" -eq 1 ]   # npx (drawio)
   grep -qF 'try { $p.StandardInput.Close() } catch { }' "$f"
-  grep -qF "if (\$src -match '\.(cmd|bat|ps1)\$') { return @('cmd', '/c') + \$CommandLine }" "$f"
+  grep -qF "if (\$src -match '\.(cmd|bat|ps1)\$' -or (\$env:OS -eq 'Windows_NT' -and \$src -notmatch '\.exe\$')) { return @('cmd', '/c') + \$CommandLine }" "$f"
   for c in uvx codebase-memory-mcp npx; do
     grep -qF "if (-not (Test-Cmd '$c')) {" "$f" || { echo "no runtime guard for $c"; false; }
   done

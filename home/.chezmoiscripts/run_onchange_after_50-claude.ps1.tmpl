@@ -187,7 +187,8 @@ if ($claudeOk) {
     # .bat or .ps1 shim runs through `cmd /c`.
     function Get-McpCommandLine([string[]]$CommandLine) {
         $src = (Get-Command $CommandLine[0] -ErrorAction SilentlyContinue).Source
-        if ($src -match '\.(cmd|bat|ps1)$') { return @('cmd', '/c') + $CommandLine }
+        # Windows: anything but an .exe (npx.cmd, a .ps1 shim) runs through cmd /c
+        if ($src -match '\.(cmd|bat|ps1)$' -or ($env:OS -eq 'Windows_NT' -and $src -notmatch '\.exe$')) { return @('cmd', '/c') + $CommandLine }
         return $CommandLine
     }
     # Invoke-Prewarm help|stdin COMMAND [ARG]...: run the server command once,

@@ -18,6 +18,8 @@ setup() {
   [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
   new_sandbox
   STUB="$SB/stub"; mkdir -p "$STUB"
+  # a failing codex first on every PATH, so no test can reach a host codex
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/codex"; chmod +x "$STUB/codex"
 }
 teardown() { chmod -R u+w "$SB" 2>/dev/null; rm -rf "$SB"; }
 
@@ -282,7 +284,7 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
   render_tmpl "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
   fake_world "$SB/codex.sh"
   stub curl 'exit 22'
-  rm -f "$STUB/codex"
+  stub codex 'exit 1'   # codex missing (never the host's)
   run_script "$SB/codex.sh"
   echo "$output"
   [ "$status" -eq 0 ]
@@ -433,6 +435,7 @@ render_os() {
 drawio 120
 openaiDeveloperDocs 60" ]
   grep -qx 'trust_level = "trusted"' "$c"
+  ! grep -q 'hook-augment' "$c"   # no cbm here: its hooks are dropped too
   # links are still relative symlinks on macOS
   [ "$(readlink "$SB_HOME/.codex/skills/caveman")" = "../skill-bundles/caveman-$(lock codex-bundle-caveman)/skills/caveman" ]
 }
@@ -506,6 +509,12 @@ PSEOF
   ! grep -q 'CODEX_INSTALL_DIR' "$f"   # its bin dir becomes a junction: never ~/.local/bin
   grep -qF '& codebase-memory-mcp install -y --skip-binary --clients=codex' "$f"
   grep -qF 'New-Item -ItemType Junction -Path $dst -Target $target' "$f"
+  grep -qF '& $tarExe -xzf $tgz -C $tmp --strip-components=1' "$f"   # Windows tar, not Git's GNU tar
+  grep -qF "\$sys32 = Join-Path \$env:SystemRoot 'System32'" "$f"
+  grep -qF 'Add-UserPath $codexBin' "$f"
+  grep -qF "-replace '^\\\\\\\\\\?\\\\', ''" "$f"   # junction targets compared without \\?\
+  grep -qF 'Move-Item -Force $tmpCfg $cfg' "$f"
+  grep -qF "\$env:OS -eq 'Windows_NT' -and \$src -notmatch '\\.exe\$'" "$f"
   grep -qF -- '--desktop --keep-on-error --fragment-b64 $fragB64 --current-file' "$f"
   grep -qF "Invoke-Prewarm help (Get-McpCommandLine @('uvx', '--python', '3.12', '--from', 'semble[mcp]==$(lock mcp-semble)', 'semble'))" "$f"
   grep -qF "Invoke-Prewarm stdin (Get-McpCommandLine @('npx', '-y', '@next-ai-drawio/mcp-server@$(lock mcp-drawio)'))" "$f"
