@@ -353,6 +353,7 @@ EOF
   [[ "$output" == *"SKIP fish_present: server role only (role: desktop)"* ]]
   DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"SKIP codex_installed: server role only"* ]]
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/claude"; chmod +x "$STUB/claude"   # never the host's claude
   DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"claude_mcp"* ]]   # Claude Code checks run on every role
   [[ "$output" != *"server role only"* ]]
@@ -602,7 +603,8 @@ EOF
 }
 
 @test "doctor: plain desktop runs every Claude check; every role WARNs on a missing status line" {
-  DEVENV_ROLE=desktop HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  printf '#!/bin/sh\nexit 1\n' > "$STUB/claude"; chmod +x "$STUB/claude"   # never the host's claude
+  DEVENV_ROLE=desktop HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   for c in claude_installed claude_plugins claude_mcp claude_skills statusline_installed claude_login; do
     [[ "$output" == *" $c"* ]]
@@ -610,7 +612,7 @@ EOF
   done
   [[ "$output" == *"WARN statusline_installed:"*"release download failed"* ]]
   [[ "$output" == *"SKIP claude_login: login check skipped in --ci"* ]]
-  DEVENV_ROLE=server HOME="$SB_HOME" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   echo "$output"
   [[ "$output" == *"WARN statusline_installed:"*"release download failed"*"bin/update"* ]]
   [[ "$output" != *"no statusline release locked"* ]]
