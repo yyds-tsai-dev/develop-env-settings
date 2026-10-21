@@ -73,9 +73,12 @@ bootstrap_main() {
         done
     fi
 
+    # Linux: the static (musl) builds, which run on any glibc (the stock chezmoi
+    # linux-amd64 build needs glibc >= 2.32; RHEL/Rocky 8 has 2.28). chezmoi
+    # publishes no musl build for arm64.
     case "$(uname -s)-$(uname -m)" in
-        Linux-x86_64)  cz=linux-amd64;  uvt=x86_64-unknown-linux-gnu ;;
-        Linux-aarch64) cz=linux-arm64;  uvt=aarch64-unknown-linux-gnu ;;
+        Linux-x86_64)  cz=linux-amd64-musl; uvt=x86_64-unknown-linux-musl ;;
+        Linux-aarch64) cz=linux-arm64;      uvt=aarch64-unknown-linux-musl ;;
         Darwin-arm64)  cz=darwin-arm64; uvt=aarch64-apple-darwin ;;
         Darwin-x86_64) cz=darwin-amd64; uvt=x86_64-apple-darwin ;;
         *) echo "error: unsupported platform $(uname -s) $(uname -m)" >&2; return 1 ;;
