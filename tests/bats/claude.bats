@@ -418,6 +418,27 @@ run_script() {
   ! grep -q '^plugin marketplace add' "$SB/calls"
 }
 
+@test "install script removes group/other write from ~/.local and ~/.local/bin before the cbm installer" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  n_fix="$(grep -n 'chmod go-w' "$f" | head -1 | cut -d: -f1)"
+  n_inst="$(grep -n 'bash "$tmp/install.sh"' "$f" | cut -d: -f1)"
+  [ -n "$n_fix" ] && [ "$n_fix" -lt "$n_inst" ]
+  stub curl 'exit 22'
+  stub codebase-memory-mcp 'echo "codebase-memory-mcp 0.0.0"'   # stale: the installer step runs
+  mkdir -p "$SB_HOME/.local/bin/keep"
+  chmod 0775 "$SB_HOME/.local" "$SB_HOME/.local/bin"; chmod 0777 "$SB_HOME/.local/bin/keep"
+  run_script "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$SB_HOME/.local")" = 755 ]
+  [ "$(stat -c %a "$SB_HOME/.local/bin")" = 755 ]
+  [ "$(stat -c %a "$SB_HOME/.local/bin/keep")" = 777 ]   # never recursive
+  [[ "$output" == *"removed group/other write permission from $SB_HOME/.local (the codebase-memory-mcp installer refuses it)"*"removed group/other write permission from $SB_HOME/.local/bin "*"could not download the codebase-memory-mcp"* ]]
+  run_script "$f"
+  [[ "$output" != *"removed group/other write"* ]]
+}
+
 @test "install script warns and exits 0 when claude cannot be installed" {
   [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
   f="$(render_script)"

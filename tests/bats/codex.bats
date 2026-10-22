@@ -280,6 +280,26 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
   grep -qx "https://raw.githubusercontent.com/openai/codex/rust-v$(lock codex)/scripts/install/install.sh" "$SB/curl.log"
 }
 
+@test "install script removes group/other write from ~/.local and ~/.local/bin before the installers" {
+  render_tmpl "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
+  n_fix="$(grep -n 'chmod go-w' "$SB/codex.sh" | head -1 | cut -d: -f1)"
+  n_inst="$(grep -n 'sh "$tmp/install.sh"' "$SB/codex.sh" | cut -d: -f1)"
+  n_cbm="$(grep -n 'codebase-memory-mcp install -y' "$SB/codex.sh" | cut -d: -f1)"
+  [ -n "$n_fix" ] && [ "$n_fix" -lt "$n_inst" ] && [ "$n_fix" -lt "$n_cbm" ]
+  fake_world "$SB/codex.sh"
+  stub curl 'exit 22'
+  stub codex 'exit 1'
+  mkdir -p "$SB_HOME/.local/bin/keep"
+  chmod 0757 "$SB_HOME/.local"; chmod 0775 "$SB_HOME/.local/bin"; chmod 0777 "$SB_HOME/.local/bin/keep"
+  run_script "$SB/codex.sh"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a "$SB_HOME/.local")" = 755 ]
+  [ "$(stat -c %a "$SB_HOME/.local/bin")" = 755 ]
+  [ "$(stat -c %a "$SB_HOME/.local/bin/keep")" = 777 ]
+  [ "$(printf '%s\n' "$output" | grep -c '^removed group/other write permission from ')" -eq 2 ]
+}
+
 @test "install script warns and exits 0 when downloads fail" {
   render_tmpl "home/.chezmoiscripts/$SCRIPT" "$SB/codex.sh"
   fake_world "$SB/codex.sh"

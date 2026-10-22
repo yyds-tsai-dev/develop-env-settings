@@ -41,6 +41,8 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 
 - Every file Bootstrap changes is first copied to `~/.dotfiles-backup-<timestamp>` (mode 700).
 - A warning about NFS or long-running processes never blocks.
+- On a umask 002 home, Bootstrap and the Claude and Codex install scripts remove group/other write permission from `~/.local` and `~/.local/bin` (only those two dirs), since the codebase-memory-mcp installer refuses them otherwise; Doctor's `local_bin_perms` check fails while they are writable.
+- A system tmux older than 3.0 (RHEL/Rocky 8 ships 2.7) is shadowed by the `cli-tools` env tmux linked into `~/.local/bin`; a system tmux 3.0 or newer stays first.
 - Apply never deletes old tools (previous micromamba envs, nvm, tarball Node); `bin/cleanup` does, after confirmation.
 - Bootstrap never applies dotfiles on a hold home (one with `~/.config/develop-env/hold`); only the machine-local steps run.
 - On a machine with a working environment, review `chezmoi diff` before the first apply.
@@ -59,6 +61,10 @@ Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare
 | Roll back versions | `cd "$(chezmoi source-path)/.." && git checkout <rev> -- home/.chezmoidata/versions.yaml && chezmoi apply` |
 
 `bin/capture` runs `chezmoi re-add`, rewrites `desktop/vscode/server-extensions.txt` from `~/.vscode-server/extensions`, and updates the membership of `claude.plugins`, `claude.marketplaces`, `uv_tools`, `cli_tools` and `pdftools` in `home/.chezmoidata/manifest.yaml`. It also compares the manifest `mcp` entries with the user-scope Claude MCP servers (names and commands only, from `~/.claude.json` `mcpServers` or `claude mcp list`) and prints the differences without rewriting them, since their args are templated. It never changes the Version lock.
+
+### Machine-local settings
+
+Untracked `*.local` files hold what belongs to one machine: `~/.bashrc.local`, `~/.config/fish/config.local.fish`, `~/.gitconfig.local`. `~/.bashrc.local` is for environment that every bash needs, interactive or not: it is sourced right after the managed PATH block, before the non-interactive return, so scripts, `bash -c`, `bash -lc` and ssh commands see it (for example a hostname-gated `export DREAMPLACE_ROOT=...`). `config.local.fish` is likewise read by every fish. On RHEL-family hosts the managed `~/.bashrc` sources `/etc/bashrc` first, as the stock one does, so site settings (module, EDA setup) still load.
 
 ### Retrying installs
 

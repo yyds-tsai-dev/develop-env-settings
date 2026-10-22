@@ -21,3 +21,20 @@ check_install_retries() {
   echo "install scripts waiting for a retry:$pending: $DOCTOR_FIX"; return 3
 }
 register check_install_retries
+
+# FAIL: a group- or other-writable ~/.local or ~/.local/bin (a umask 002 home)
+# makes the codebase-memory-mcp installer refuse to install, so its install
+# scripts retry forever. bootstrap and the install scripts tighten them.
+check_local_bin_perms() {
+  local d bad=
+  for d in "$HOME/.local" "$HOME/.local/bin"; do
+    [ -d "$d" ] || continue
+    case "$(ls -ldL "$d" 2>/dev/null)" in
+      ?????w*|????????w*) bad="$bad $d" ;;
+    esac
+  done
+  [ -z "$bad" ] && return 0
+  echo "group/other-writable:$bad (the codebase-memory-mcp installer refuses it): run chmod go-w$bad"
+  return 1
+}
+register check_local_bin_perms

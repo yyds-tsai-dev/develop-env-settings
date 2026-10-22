@@ -47,6 +47,10 @@ done_or_retry() {
     exit 0
 }
 
+# The codebase-memory-mcp installer below refuses a group/other-writable
+# ~/.local or ~/.local/bin (umask 002 homes).
+{{ template "local-bin-perms" }}
+
 # --- Codex standalone build (upstream install.sh at the locked tag) ---
 # ~/.local/bin is already on PATH above, so the installer edits no shell profile.
 CODEX_VERSION="{{ $codex }}"

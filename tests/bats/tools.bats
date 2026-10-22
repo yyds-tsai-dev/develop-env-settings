@@ -269,7 +269,7 @@ EOF
   [[ "$output" == *"PASS chezmoi_present"* ]]   # doctor still ran
 }
 
-@test "symlinks script leaves a system tmux first, links the env tmux otherwise" {
+@test "symlinks script leaves a system tmux >= 3.0 first, links the env tmux otherwise" {
   f="$(render run_onchange_after_15-symlinks.sh.tmpl)"
   e="$H/micromamba/envs/cli-tools"; mkdir -p "$e/bin" "$e/conda-meta"
   printf '#!/bin/sh\n' > "$e/bin/tmux"; chmod +x "$e/bin/tmux"
@@ -280,12 +280,30 @@ EOF
   run env -i HOME="$H" PATH="$H/.local/bin:$tb" sh "$f"
   [ "$status" -eq 0 ]
   [ "$(readlink "$H/.local/bin/tmux")" = "$e/bin/tmux" ]
-  stub tmux 'echo system tmux'
+  # a system tmux 3.2a (Ubuntu 22.04) stays first: the earlier link is dropped
+  stub tmux '[ "$1" = -V ] && echo "tmux 3.2a"'
   run env -i HOME="$H" PATH="$H/.local/bin:$STUB:$tb" sh "$f"
   echo "$output"
   [ "$status" -eq 0 ]
   [ ! -e "$H/.local/bin/tmux" ] && [ ! -L "$H/.local/bin/tmux" ]
-  [[ "$output" == *"system tmux found"* ]]
+  [[ "$output" == *"system tmux 3.2a found; not linking the env tmux"* ]]
+  # a system tmux 2.7 (RHEL/Rocky 8) is too old for Doctor: the env tmux is linked
+  stub tmux '[ "$1" = -V ] && echo "tmux 2.7"'
+  run env -i HOME="$H" PATH="$H/.local/bin:$STUB:$tb" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$H/.local/bin/tmux")" = "$e/bin/tmux" ]
+  [[ "$output" == *"system tmux 2.7 is older than 3.0; linking the env tmux"* ]]
+  # 3.8 (no letter suffix) is kept; an unparsable version links the env tmux
+  stub tmux '[ "$1" = -V ] && echo "tmux 3.8"'
+  run env -i HOME="$H" PATH="$H/.local/bin:$STUB:$tb" sh "$f"
+  [ "$status" -eq 0 ]
+  [ ! -L "$H/.local/bin/tmux" ]
+  [[ "$output" == *"system tmux 3.8 found"* ]]
+  stub tmux 'echo garbage'
+  run env -i HOME="$H" PATH="$H/.local/bin:$STUB:$tb" sh "$f"
+  [ "$status" -eq 0 ]
+  [ "$(readlink "$H/.local/bin/tmux")" = "$e/bin/tmux" ]
 }
 
 @test "long-running process filter exempts children of session services and agents only" {
@@ -322,6 +340,45 @@ EOF2
   [[ "$output" != *"warning: reusing"* ]]
   run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --role server --ci
   [[ "$output" != *"warning: reusing"* ]]
+}
+
+@test "bootstrap removes group/other write from ~/.local and ~/.local/bin only (umask 002 home)" {
+  stub uv 'exit 0'
+  stub chezmoi 'exit 7'   # stop right after the clone step
+  mkdir -p "$H/.local/bin/sub" "$H/.local/share/chezmoi"
+  git -C "$H/.local/share/chezmoi" init -q
+  chmod 0775 "$H/.local" "$H/.local/bin"; chmod 0777 "$H/.local/bin/sub"
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh -c 'umask 002; exec sh "$1" --source /repo --role server --ci' _ "$REPO_ROOT/bootstrap.sh"
+  echo "$output"
+  [ "$(stat -c %a "$H/.local")" = 755 ]
+  [ "$(stat -c %a "$H/.local/bin")" = 755 ]
+  [ "$(stat -c %a "$H/.local/bin/sub")" = 777 ]   # never recursive
+  [ "$(printf '%s\n' "$output" | grep -c '^removed group/other write permission from ')" -eq 2 ]
+  # already tight: silent
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$REPO_ROOT/bootstrap.sh" --source /repo --role server --ci
+  [[ "$output" != *"removed group/other write"* ]]
+  # a fresh home under umask 002: mkdir -p makes 0775, which is tightened at once
+  h2="$SB/h2"; mkdir -p "$h2"; chmod 0755 "$h2"
+  run env -i HOME="$h2" PATH="$STUB:/usr/bin:/bin" sh -c 'umask 002; exec sh "$1" --source /repo --role server --ci' _ "$REPO_ROOT/bootstrap.sh"
+  [ "$(stat -c %a "$h2/.local")" = 755 ]
+  [ "$(stat -c %a "$h2/.local/bin")" = 755 ]
+}
+
+@test "doctor local_bin_perms FAILs on a group/other-writable ~/.local or ~/.local/bin with the chmod hint" {
+  mkdir -p "$H/.local/bin"; chmod 0755 "$H/.local" "$H/.local/bin"
+  HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"PASS local_bin_perms"* ]]
+  chmod 0775 "$H/.local/bin"
+  HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL local_bin_perms: group/other-writable: $H/.local/bin (the codebase-memory-mcp installer refuses it): run chmod go-w $H/.local/bin"* ]]
+  chmod 0757 "$H/.local"
+  HOME="$H" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"FAIL local_bin_perms: group/other-writable: $H/.local $H/.local/bin "*"run chmod go-w $H/.local $H/.local/bin"* ]]
+  # no ~/.local at all: nothing to check
+  HOME="$SB/none" DOCTOR_ONLY='00-*' run "$REPO_ROOT/bin/doctor" --ci
+  [[ "$output" == *"PASS local_bin_perms"* ]]
 }
 
 @test "bootstrap on macOS: the Xcode stub git prints xcode-select --install, never sudo apt" {

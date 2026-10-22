@@ -5,8 +5,9 @@
 # package's conda-meta file list), never their dependencies (bzip2, openssl,
 # ncurses tools, ...), which would shadow system tools on PATH.
 # An existing symlink is replaced; an existing regular file is left alone with a
-# warning. tmux is linked only when the system lacks one (it is still installed
-# in the env); a system tmux stays first on PATH. Reruns when a pin changes, and
+# warning. tmux is linked only when the system lacks one or has one older than
+# 3.0 (e.g. RHEL/Rocky 8's 2.7; Doctor needs >= 3.0); a system tmux >= 3.0 stays
+# first on PATH (the env still has tmux). Reruns when a pin changes, and
 # with 10-micromamba-envs while that script retries (its retry marker below), so
 # links follow envs a retry installed.
 {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "10-micromamba-envs") }}
@@ -22,14 +23,30 @@ system_has() {
      command -v "$1" >/dev/null 2>&1)
 }
 
+# system_tmux_version: the major.minor-ish version of the tmux on PATH outside
+# ~/.local/bin (`tmux -V`: "tmux 2.7", "tmux 3.2a", "tmux 3.8"), empty when none.
+system_tmux_version() {
+    (PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF -e "$BIN" -e "$BIN/" | tr '\n' ':')"
+     command -v tmux >/dev/null 2>&1 || exit 0
+     v="$(tmux -V 2>/dev/null)"
+     v="${v#"${v%%[0-9]*}"}"   # drop "tmux " (or any non-digit prefix)
+     printf '%s' "$v")
+}
+
 # link_pkg ENV PKG [VERSION]
 link_pkg() {
     env="$MAMBA_ROOT_PREFIX/envs/$1"
     if [ "$2" = tmux ] && system_has tmux; then
-        # Drop a link this script made earlier so the system tmux wins.
-        case "$(readlink "$BIN/tmux" 2>/dev/null)" in "$env"/*) rm -f "$BIN/tmux" ;; esac
-        echo "system tmux found; not linking the env tmux"
-        return 0
+        sv="$(system_tmux_version)"
+        major="${sv%%.*}"
+        case "$major" in ''|*[!0-9]*) major=0 ;; esac
+        if [ "$major" -ge 3 ]; then
+            # Drop a link this script made earlier so the system tmux wins.
+            case "$(readlink "$BIN/tmux" 2>/dev/null)" in "$env"/*) rm -f "$BIN/tmux" ;; esac
+            echo "system tmux $sv found; not linking the env tmux"
+            return 0
+        fi
+        echo "system tmux ${sv:-of unknown version} is older than 3.0; linking the env tmux"
     fi
     found=
     for meta in "$env/conda-meta/$2"-[0-9]*.json; do

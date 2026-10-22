@@ -68,7 +68,9 @@ if claude --version >/dev/null 2>&1; then CLAUDE_OK=1; else warn "claude missing
 # --- codebase-memory-mcp (upstream installer pinned to the lock) ---
 # The installer rewrites settings.json hooks and registers the MCP server with an
 # absolute path; both are put back below. --clients=claude: Codex is configured
-# by its own managed config.
+# by its own managed config. It refuses a group/other-writable ~/.local or
+# ~/.local/bin (umask 002 homes), so those two dirs are tightened first.
+{{ template "local-bin-perms" }}
 CBM_VERSION="{{ $cbm }}"
 if [ "$(codebase-memory-mcp --version 2>/dev/null)" != "codebase-memory-mcp $CBM_VERSION" ] \
    && { [ -n "$CBM_VERSION" ] || ! command -v codebase-memory-mcp >/dev/null 2>&1; }; then

@@ -306,3 +306,76 @@ zsh_apply() {
   [ "$status" -eq 0 ]
   [ ! -e "$h/.local/state/develop-env/retry/20-fish-plugins" ]
 }
+
+@test "~/.bashrc.local reaches non-interactive bash (bash -c, bash -lc, scripts)" {
+  render_server
+  h="$(mktemp -d "${TMPDIR:-/tmp}/devenv-h.XXXXXX")"
+  cp "$DEST/.bashrc" "$h/.bashrc"
+  printf 'export FOO=from-local\n' > "$h/.bashrc.local"
+  # a non-interactive shell that reads ~/.bashrc (as sshd's `ssh host cmd` does)
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" bash --norc -c '. ~/.bashrc; echo "FOO=$FOO"')"
+  [ "$out" = "FOO=from-local" ]
+  # the real sshd path: bash -c reads ~/.bashrc by itself when SSH_CLIENT is set
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" SSH_CLIENT='192.0.2.1 1 22' bash -c 'echo "FOO=$FOO"')"
+  [ "$out" = "FOO=from-local" ]
+  # a login shell whose ~/.bash_profile sources ~/.bashrc (Rocky's stock one does)
+  printf '[ -f ~/.bashrc ] && . ~/.bashrc\n' > "$h/.bash_profile"
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" bash -lc 'echo "FOO=$FOO"')"
+  [ "$out" = "FOO=from-local" ]
+  # ~/.local/bin stays first after it, interactive or not
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" bash --norc -c '. ~/.bashrc; echo "$PATH"')"
+  [ "${out%%:*}" = "$h/.local/bin" ]
+  # sourced before the non-interactive return, after the managed PATH block
+  n_local="$(grep -n 'bashrc.local' "$DEST/.bashrc" | grep -v '^[0-9]*:#' | head -1 | cut -d: -f1)"
+  n_ret="$(grep -n '\*) return;;' "$DEST/.bashrc" | cut -d: -f1)"
+  n_path="$(grep -n '^# <<< develop-env path <<<' "$DEST/.bashrc" | cut -d: -f1)"
+  [ "$n_path" -lt "$n_local" ] && [ "$n_local" -lt "$n_ret" ]
+  [ "$(grep -c '\. ~/.bashrc.local' "$DEST/.bashrc")" -eq 1 ]
+}
+
+@test "bashrc sources the RHEL /etc/bashrc first, once, without recursion" {
+  render_server
+  h="$(mktemp -d "${TMPDIR:-/tmp}/devenv-h.XXXXXX")"
+  cp "$DEST/.bashrc" "$h/.bashrc"
+  mkdir -p "$h/etc"
+  # a site file that sets a module variable, prepends PATH and (badly) sources ~/.bashrc
+  cat > "$h/etc/bashrc" <<'B'
+SITE_N=$(( ${SITE_N:-0} + 1 )); export SITE_N
+export MODULEPATH=/site/modules
+export PATH="/site/bin:$PATH"
+. ~/.bashrc
+B
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" DEVENV_ETC_BASHRC="$h/etc/bashrc" \
+    bash --norc -c '. ~/.bashrc; echo "$SITE_N $MODULEPATH $PATH"')"
+  echo "$out"
+  set -- $out
+  [ "$1" = 1 ] && [ "$2" = /site/modules ]
+  [ "${3%%:*}" = "$h/.local/bin" ]          # ~/.local/bin still first
+  [[ ":$3:" == *":/site/bin:"* ]]
+  # interactive too
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" DEVENV_ETC_BASHRC="$h/etc/bashrc" \
+    bash --norc -i -c '. ~/.bashrc; echo "SITE=$SITE_N"' </dev/null 2>/dev/null)"
+  [[ "$out" == *"SITE=1"* ]]
+  # no site file: nothing happens
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" DEVENV_ETC_BASHRC="$h/etc/none" \
+    bash --norc -c '. ~/.bashrc; echo "SITE=${SITE_N:-unset}"')"
+  [ "$out" = "SITE=unset" ]
+  # the default path is /etc/bashrc, before the managed PATH block; /etc/bash.bashrc
+  # is left to bash itself, as in Ubuntu's stock ~/.bashrc
+  grep -qF '${DEVENV_ETC_BASHRC:-/etc/bashrc}' "$DEST/.bashrc"
+  n_etc="$(grep -n '^    \. "${DEVENV_ETC_BASHRC' "$DEST/.bashrc" | cut -d: -f1)"
+  n_path="$(grep -n '^# >>> develop-env path >>>' "$DEST/.bashrc" | cut -d: -f1)"
+  [ "$n_etc" -lt "$n_path" ]
+  ! grep -q '^[^#]*/etc/bash.bashrc' "$DEST/.bashrc"
+}
+
+@test "config.local.fish reaches non-interactive fish" {
+  [ -n "$FISH" ] || skip "fish not available"
+  render_server
+  h="$(mktemp -d "${TMPDIR:-/tmp}/devenv-h.XXXXXX")"
+  cp -R "$DEST/.config" "$h/.config"
+  printf 'set -gx FOO from-local\n' > "$h/.config/fish/config.local.fish"
+  out="$(env -i HOME="$h" PATH="/usr/bin:/bin" XDG_CONFIG_HOME="$h/.config" "$FISH" -c 'echo "FOO=$FOO"' 2>/dev/null)"
+  [ "$out" = "FOO=from-local" ]
+  ! grep -q '^[^#]*is-interactive' "$DEST/.config/fish/config.fish"
+}

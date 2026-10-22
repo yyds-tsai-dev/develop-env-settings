@@ -1,0 +1,15 @@
+{{- /*
+local-bin-perms: sh lines that remove group/other write permission from
+~/.local and ~/.local/bin (only those two dirs, never recursive) and print one
+line saying so. The codebase-memory-mcp installer refuses to install into a
+group- or other-writable ~/.local/bin or ancestor, which a umask 002 home
+(mkdir -p gives 0775) produces. bootstrap.sh carries the same lines (it runs
+before chezmoi). Use: {{ template "local-bin-perms" }}
+*/ -}}
+for d in "$HOME/.local" "$HOME/.local/bin"; do
+    [ -d "$d" ] || continue
+    case "$(ls -ldL "$d" 2>/dev/null)" in
+        ?????w*|????????w*)
+            chmod go-w "$d" && echo "removed group/other write permission from $d (the codebase-memory-mcp installer refuses it)" ;;
+    esac
+done
