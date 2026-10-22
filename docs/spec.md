@@ -44,7 +44,7 @@ Steps that need admin rights (system packages, Homebrew's first install, elevate
 ## Components
 
 - **Shell**: fish launched from `.bashrc` via the existing interactive-TTY `exec fish` guard (login shell cannot be changed on directory-service accounts). Where the login shell is tcsh, a managed block appended at the end of `~/.tcshrc` (or `~/.cshrc` when only that exists) does the same; the rest of that file, such as EDA tool setup, is never touched. fisher plugins: fisher, z, sponge, autopair, fzf.fish, tide v6; tide settings captured. `vscode_remote_env.fish` kept for `VSCODE_IPC_HOOK_CLI` / remote-cli PATH refresh in tmux; its `GIT_ASKPASS` refresh is dropped once git uses SSH/gh.
-- **CLI tools env** (`cli-tools`, conda-forge via micromamba on Linux; Homebrew on macOS; winget where applicable on Windows): fish, tmux (when the system lacks one), fzf, fd, bat, ripgrep, jq, gh, git-lfs. Optional `pdftools` env (poppler), installed by default. micromamba `base` left empty.
+- **CLI tools env** (`cli-tools`, conda-forge via micromamba on Linux; Homebrew on macOS; winget where applicable on Windows): fish, tmux (linked when the system lacks one or has one older than 3.0), fzf, fd, bat, ripgrep, jq, gh, git-lfs. Optional `pdftools` env (poppler), installed by default. micromamba `base` left empty.
 - **tmux**: current `~/.tmux.conf` (prefix C-a, mouse, 100k history, VS Code env pass-through).
 - **Node**: fnm, default Node 24 LTS; old tarball Node and `~/.nvm` are left in place by apply and removed by `bin/cleanup`.
 - **uv**: standalone install; uv tools from the Manifest (semble[mcp], graphifyy[mcp], paper-search-mcp).

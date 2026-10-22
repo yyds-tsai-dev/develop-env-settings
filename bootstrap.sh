@@ -45,6 +45,16 @@ bootstrap_main() {
 
     bin="$HOME/.local/bin"
     mkdir -p "$bin"
+    # The codebase-memory-mcp installer (run by apply) refuses a group- or
+    # other-writable ~/.local or ~/.local/bin, which a umask 002 home gives:
+    # tighten only those two dirs, never recursively. Same check as
+    # home/.chezmoitemplates/local-bin-perms.
+    for d in "$HOME/.local" "$bin"; do
+        case "$(ls -ldL "$d" 2>/dev/null)" in
+            ?????w*|????????w*)
+                chmod go-w "$d" && echo "removed group/other write permission from $d (the codebase-memory-mcp installer refuses it)" ;;
+        esac
+    done
     PATH="$bin:$PATH"
     export PATH
 

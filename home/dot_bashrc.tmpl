@@ -1,6 +1,18 @@
 # ~/.bashrc: executed by bash(1) for non-login shells.
 # see /usr/share/doc/bash/examples/startup-files (in the package bash-doc)
 # for examples
+# >>> develop-env system bashrc >>>
+# RHEL-family site settings (/etc/profile.d, module and EDA setup) live in
+# /etc/bashrc, which bash never reads itself; Rocky's stock ~/.bashrc sources
+# it, so this one does too (Debian/Ubuntu bash reads /etc/bash.bashrc on its
+# own, as before). Guarded so a site file that sources ~/.bashrc cannot recurse.
+# DEVENV_ETC_BASHRC overrides the path (tests only).
+if [ -z "${__DE_IN_ETC_BASHRC:-}" ] && [ -f "${DEVENV_ETC_BASHRC:-/etc/bashrc}" ]; then
+    __DE_IN_ETC_BASHRC=1
+    . "${DEVENV_ETC_BASHRC:-/etc/bashrc}"
+    unset __DE_IN_ETC_BASHRC
+fi
+# <<< develop-env system bashrc <<<
 # >>> develop-env path >>>
 # ~/.local/bin first, exactly once (re-sourcing does not duplicate it).
 __de_path_first() {
@@ -11,6 +23,11 @@ __de_path_first() {
 }
 __de_path_first
 # <<< develop-env path <<<
+
+# Machine-local environment (untracked): sourced by every bash, interactive or
+# not (scripts, `bash -c`, `bash -lc`, ssh commands), so put variables every
+# shell needs here, e.g. a hostname-gated `export DREAMPLACE_ROOT=...`.
+[ -f ~/.bashrc.local ] && . ~/.bashrc.local
 
 # If not running interactively, don't do anything
 case $- in
@@ -136,8 +153,6 @@ if command -v fnm >/dev/null 2>&1; then
 fi
 __de_path_first   # hooks above may prepend their own dirs
 # <<< develop-env tools <<<
-
-[ -f ~/.bashrc.local ] && . ~/.bashrc.local
 
 # Start fish only for an interactive terminal without a -c command.
 # Last, so PATH, micromamba and fnm are already set before fish starts.
