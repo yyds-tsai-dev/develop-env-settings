@@ -23,6 +23,7 @@ of run_onchange_after_50-claude.sh. */ -}}
 # removes it.
 {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
 # Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
+# Codex bundle locks (a changed one re-runs this script so installed plugins are updated):{{ range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -155,10 +156,15 @@ if ($claudeOk) {
         & claude plugin marketplace add {{ .repo | squote }}
         if ($LASTEXITCODE -ne 0) { Warn-Step 'could not add marketplace {{ .name }}' }
     }
+    & claude plugin marketplace update {{ .name | squote }}
+    if ($LASTEXITCODE -ne 0) { Warn-Step 'could not update marketplace {{ .name }}' }
 {{- end }}
     $plugins = (& claude plugin list --json 2>$null) -join "`n"
 {{- range .claude.plugins }}
-    if (-not $plugins.Contains('"id": "{{ .name }}"')) {
+    if ($plugins.Contains('"id": "{{ .name }}"')) {
+        & claude plugin update {{ .name | squote }}
+        if ($LASTEXITCODE -ne 0) { Warn-Step 'could not update plugin {{ .name }}' }
+    } else {
         & claude plugin install {{ .name | squote }}
         if ($LASTEXITCODE -ne 0) { Warn-Step 'could not install plugin {{ .name }}' }
     }

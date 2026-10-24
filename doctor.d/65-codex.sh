@@ -132,7 +132,7 @@ check_codex_bundle_versions() {
 $(_codex_bundle_plugins)
 DEVENV_BUNDLES
   [ -z "$drift" ] && return 0
-  echo "Codex bundle and Claude plugin versions differ:$drift (run bin/update; claude plugin update <plugin>)"
+  echo "Codex bundle and Claude plugin versions differ:$drift (run bin/update, which updates installed Claude plugins; manual fallback: claude plugin update <name>@<marketplace>)"
   return 3
 }
 register check_codex_bundle_versions

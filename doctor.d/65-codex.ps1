@@ -143,7 +143,7 @@ function check_codex_bundle_versions {
         if ($cv -ne $clv) { $drift += "$name(codex $cv, claude $clv)" }
     }
     if ($drift.Count -eq 0) { return $null }
-    return @{ Status = 'WARN'; Reason = "Codex bundle and Claude plugin versions differ: $($drift -join ' ') (re-run the bootstrap one-liner; claude plugin update <plugin>)" }
+    return @{ Status = 'WARN'; Reason = "Codex bundle and Claude plugin versions differ: $($drift -join ' ') (re-run the bootstrap one-liner, which updates installed Claude plugins; manual fallback: claude plugin update <name>@<marketplace>)" }
 }
 Register 'check_codex_bundle_versions'
 

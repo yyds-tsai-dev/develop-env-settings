@@ -369,6 +369,7 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == *"WARN codex_bundle_versions: Codex bundle and Claude plugin versions differ: codex-bundle-mattpocock-skills(codex 9.9.9, claude 1.0.0)"* ]]
   [[ "$output" != *caveman\(* ]]
+  [[ "$output" == *"run bin/update, which updates installed Claude plugins; manual fallback: claude plugin update <name>@<marketplace>"* ]]
   HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='65-*' run "$REPO_ROOT/bin/doctor"
   [ "$status" -eq 1 ]
   [[ "$output" == *"FAIL codex_login"* ]]

@@ -285,6 +285,78 @@ EOF
   [ ! -e "$m" ]
 }
 
+@test "install script updates installed plugins, installs missing ones, and marks a failed update for retry" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  set -- $(manifest_plugins); inst="$1"; miss="$2"
+  printf '  {\n    "id": "%s"\n  },\n' "$inst" > "$SB/plugins.json"
+  for m2 in $(manifest_mkts); do printf '  {\n    "name": "%s"\n  },\n' "$m2"; done > "$SB/mkts.json"
+  run_script "$f"
+  echo "$output"; cat "$SB/calls"
+  [ "$status" -eq 0 ]
+  grep -qx "plugin update $inst" "$SB/calls"
+  ! grep -qx "plugin install $inst" "$SB/calls"
+  grep -qx "plugin install $miss" "$SB/calls"
+  ! grep -qx "plugin update $miss" "$SB/calls"
+  for m2 in $(manifest_mkts); do grep -qx "plugin marketplace update $m2" "$SB/calls"; done
+  # marketplaces are refreshed before any plugin is updated
+  [ "$(grep -n '^plugin marketplace update' "$SB/calls" | tail -n1 | cut -d: -f1)" -lt "$(grep -n "^plugin update $inst\$" "$SB/calls" | cut -d: -f1)" ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  # a failing `plugin update` warns, leaves the retry marker, and the run goes on
+  sed -i 's|^case "\$1 \$2" in|case "$1 $2" in\n  "plugin update") exit 1 ;;|' "$STUB/claude"
+  : > "$SB/calls"
+  run_script "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning: could not update plugin $inst"* ]]
+  [ -s "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  grep -qx "plugin install $miss" "$SB/calls"
+  grep -q '^mcp add' "$SB/calls"
+}
+
+@test "install script text changes with a Codex bundle lock and not otherwise (both scripts)" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  init_role server >&2
+  # render PREFIX SCRIPT: SCRIPT with a template prefix (a `set .versions` action) on stdin
+  render() { { printf '%s' "$1"; cat "$REPO_ROOT/home/.chezmoiscripts/$2"; } | chezmoi_iso execute-template; }
+  render_win() { { printf '%s' "$1"; sed 's/\.chezmoi\.os/"windows"/g' "$REPO_ROOT/home/.chezmoiscripts/$2"; } | chezmoi_iso execute-template; }
+  set_lock='{{ $_ := set .versions "codex-bundle-caveman" "0123456789ab" }}'
+  render '' "$SCRIPT" > "$SB/a.sh"; render '' "$SCRIPT" > "$SB/b.sh"
+  render "$set_lock" "$SCRIPT" > "$SB/c.sh"
+  cmp -s "$SB/a.sh" "$SB/b.sh"                    # nothing changed: identical
+  ! cmp -s "$SB/a.sh" "$SB/c.sh"                  # a bundle lock changed: re-run
+  grep -qF "codex-bundle-caveman=$(lock codex-bundle-caveman)" "$SB/a.sh"
+  grep -qF 'codex-bundle-caveman=0123456789ab' "$SB/c.sh"
+  render_win '' run_onchange_after_50-claude.ps1.tmpl > "$SB/a.ps1"
+  render_win '' run_onchange_after_50-claude.ps1.tmpl > "$SB/b.ps1"
+  render_win "$set_lock" run_onchange_after_50-claude.ps1.tmpl > "$SB/c.ps1"
+  cmp -s "$SB/a.ps1" "$SB/b.ps1"
+  ! cmp -s "$SB/a.ps1" "$SB/c.ps1"
+  grep -qF 'codex-bundle-caveman=0123456789ab' "$SB/c.ps1"
+  # resolved_at alone must not change the script (a no-change resolve is a no-op apply)
+  render '{{ $_ := set .versions "resolved_at" "2099-01-01T00:00:00Z" }}' "$SCRIPT" > "$SB/d.sh"
+  cmp -s "$SB/a.sh" "$SB/d.sh"
+}
+
+@test "windows install script updates installed plugins (PowerShell twin)" {
+  init_plain_desktop
+  render_os windows run_onchange_after_50-claude.ps1.tmpl > "$SB/claude.ps1"
+  f="$SB/claude.ps1"
+  for p in $(manifest_plugins); do
+    grep -qF "& claude plugin update '$p'" "$f"
+    grep -qF "& claude plugin install '$p'" "$f"
+    grep -qF "Warn-Step 'could not update plugin $p'" "$f"
+  done
+  for m2 in $(manifest_mkts); do grep -qF "& claude plugin marketplace update '$m2'" "$f"; done
+  grep -qF '# Codex bundle locks' "$f"
+  if command -v pwsh >/dev/null 2>&1; then
+    pwsh -NoProfile -Command '$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$null,[ref]$e); if ($e) { $e; exit 1 }' "$f"
+  else
+    echo "pwsh not installed: syntax parse skipped" >&2
+  fi
+}
+
 @test "generic CLAUDE.md and agents mention no project nouns" {
   [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
   run render_home server

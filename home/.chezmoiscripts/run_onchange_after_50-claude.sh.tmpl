@@ -25,6 +25,7 @@ Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
 # that removed the marker runs it once more: harmless, every step is idempotent.)
 {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
 # Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
+# Codex bundle locks (a changed one re-runs this script so installed plugins are updated):{{ range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 cd "$HOME" || exit 0
@@ -137,12 +138,21 @@ if [ -n "$CLAUDE_OK" ]; then
 {{- range .claude.marketplaces }}
     has_mkt {{ .name | squote }} || claude plugin marketplace add {{ .repo | squote }} \
         || warn "could not add marketplace {{ .name }}"
+    claude plugin marketplace update {{ .name | squote }} \
+        || warn "could not update marketplace {{ .name }}"
 {{- end }}
     plugins="$(claude plugin list --json 2>/dev/null)"
     has_plugin() { printf '%s\n' "$plugins" | grep -qF "\"id\": \"$1\""; }
+    # a missing plugin is installed; an installed one is updated to its marketplace's
+    # current version (the Codex bundles track upstream, so the two would drift)
 {{- range .claude.plugins }}
-    has_plugin {{ .name | squote }} || claude plugin install {{ .name | squote }} \
-        || warn "could not install plugin {{ .name }}"
+    if has_plugin {{ .name | squote }}; then
+        claude plugin update {{ .name | squote }} \
+            || warn "could not update plugin {{ .name }}"
+    else
+        claude plugin install {{ .name | squote }} \
+            || warn "could not install plugin {{ .name }}"
+    fi
 {{- end }}
 
 fi
