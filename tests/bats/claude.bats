@@ -351,7 +351,16 @@ EOF
   for m2 in $(manifest_mkts); do grep -qF "& claude plugin marketplace update '$m2'" "$f"; done
   grep -qF '# Codex bundle locks' "$f"
   if command -v pwsh >/dev/null 2>&1; then
-    pwsh -NoProfile -Command '$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile($args[0],[ref]$null,[ref]$e); if ($e) { $e; exit 1 }' "$f"
+    # -File (not -Command): -Command does not pass trailing words as $args
+    cat > "$SB/parse.ps1" <<'PS'
+$e = $null
+[void][System.Management.Automation.Language.Parser]::ParseFile($args[0], [ref]$null, [ref]$e)
+if ($e) { $e | ForEach-Object { $_.ToString() }; exit 1 }
+exit 0
+PS
+    run pwsh -NoProfile -File "$SB/parse.ps1" "$f"
+    echo "$output"
+    [ "$status" -eq 0 ]
   else
     echo "pwsh not installed: syntax parse skipped" >&2
   fi
