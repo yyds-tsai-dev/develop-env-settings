@@ -68,6 +68,13 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   done
   grep -qF '`~/.codex/skills/caveman/SKILL.md`' "$c/AGENTS.md"
   grep -qF '`~/.codex/skills/codex-queue-workflow/SKILL.md`' "$c/AGENTS.md"
+  # rtk: AGENTS.md ends by pointing at ~/.codex/RTK.md through the home dir, as `rtk init -g --codex` does
+  [ "$(tail -n 1 "$c/AGENTS.md")" = "@${dest%/dest}/home/.codex/RTK.md" ]   # render_home's sandbox HOME
+  ! grep -qF '{{' "$c/AGENTS.md"
+  head -n 1 "$c/RTK.md" | grep -qF '<!-- rtk-owned: written by `rtk init --codex`'
+  grep -qx '# Command output' "$c/RTK.md"
+  cmp <(tail -n 8 "$c/RTK.md") "$REPO_ROOT/home/dot_claude/RTK.md"   # same body as Claude's
+  [ ! -e "$c/hooks.json" ]   # the rtk hook lives in config.toml
   # roles keep their models and efforts
   grep -qx 'model = "gpt-6-astra"' "$c/agents/deep-reasoner.toml"
   grep -qx 'model_reasoning_effort = "high"' "$c/agents/deep-reasoner.toml"
@@ -113,6 +120,10 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   grep -qx 'env_vars = \["CBM_CACHE_DIR","CBM_RUNTIME_DIR"\]' "$f"
   grep -qx '\[mcp_servers.codebase-memory-mcp.tools.index_status\]' "$f"
   [ "$(grep -c '^command = "codebase-memory-mcp hook-augment"$' "$f")" -eq 2 ]
+  # rtk's Bash hook, once (not in a hooks.json: Codex warns about two representations)
+  [ "$(grep -c '^\[\[hooks.PreToolUse\]\]$' "$f")" -eq 1 ]
+  [ "$(grep -c '^command = "rtk hook codex"$' "$f")" -eq 1 ]
+  sed -n '/^\[\[hooks.PreToolUse\]\]$/,/^command/p' "$f" | grep -qx 'matcher = "Bash"'
   ! grep -qE '^command = "/' "$f"
 }
 

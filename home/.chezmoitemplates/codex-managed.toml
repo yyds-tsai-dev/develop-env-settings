@@ -2,6 +2,8 @@
        (modify_private_config.toml.tmpl). MCP servers come from the Manifest at
        locked versions with bare commands, or a `url` for a remote server; every
        server carries tool_timeout_sec (the entry's tool_timeout_sec, default 120).
+       The PreToolUse Bash hook is rtk's (`rtk init -g --codex` would write it to
+       ~/.codex/hooks.json; it lives here so Codex reads hooks from one place).
        Everything not listed here (projects, hooks.state, ...) stays machine-local. */ -}}
 # Unmanaged, kept machine-local: marketplaces.openai-bundled, plugins."visualize@openai-bundled", [projects.*], hooks.state.
 model = "gpt-6-astra"
@@ -38,6 +40,13 @@ approval_mode = "approve"
 {{- end }}
 {{- end }}
 {{- end }}
+
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "rtk hook codex"
 
 [[hooks.SessionStart]]
 matcher = "startup|resume|clear|compact"
