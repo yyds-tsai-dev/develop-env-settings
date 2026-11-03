@@ -60,7 +60,7 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
   echo "$output"
   [ "$status" -eq 0 ]
   no_fail_lines
-  for c in micromamba_envs cli_tools_linked node_default uv_tools fish_present fisher_tide; do
+  for c in micromamba_envs cli_tools_linked node_default uv_tools fish_present fisher_tide rtk ccusage; do
     [[ "$output" == *"PASS $c"* ]]
   done
 }
@@ -68,11 +68,18 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
 @test "npx works from a bare non-interactive PATH after bootstrap" {
   run in_box "$BOOT >/tmp/b.log 2>&1 || { cat /tmp/b.log; echo 'bootstrap failed'; exit 1; }
     env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin npx --version && echo NPX-OK
-    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin node --version"
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin node --version
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin rtk --version
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin ccusage --version
+    env -i HOME=\$HOME PATH=\$HOME/.local/bin:/usr/bin:/bin rtk init --show"
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == *NPX-OK* ]]
   [[ "$output" == *v24.* ]]
+  printf '%s\n' "$output" | grep -qE '^rtk [0-9]+\.[0-9]+'
+  printf '%s\n' "$output" | grep -qE '^ccusage [0-9]+\.[0-9]+'
+  printf '%s\n' "$output" | grep -q '^\[ok\] Hook: rtk hook claude'
+  printf '%s\n' "$output" | grep -q '^\[ok\] Global (~/.claude/CLAUDE.md): @RTK.md reference'
 }
 
 @test "second bootstrap changes nothing" {
