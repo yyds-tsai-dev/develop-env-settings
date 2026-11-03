@@ -195,3 +195,18 @@ def test_github_head_bundles_in_real_manifest_resolve_through_resolve():
         {"name": n, "source": s} for n, s in heads.items()]}}, {}, lambda s: seen.append(s) or "abcdef012345")
     assert sorted(seen) == sorted(heads.values()) and warns == []
     assert set(lock.values()) == {"abcdef012345"}
+
+
+def test_rtk_and_ccusage_are_locked_and_resolve():
+    root = Path(__file__).resolve().parents[2] / "home/.chezmoidata"
+    m = yaml.safe_load((root / "manifest.yaml").read_text())
+    lock = yaml.safe_load((root / "versions.yaml").read_text())["versions"]
+    src = {e["name"]: e["source"] for e in rv.entries(m)}
+    assert src["rtk"] == "github:rtk-ai/rtk"   # the full edition, not rtk-oss
+    assert src["ccusage"] == "npm:ccusage"
+    assert lock["rtk"] and lock["ccusage"]
+    # a lock key outside the manifest groups would be pruned by the next resolve
+    kept, _ = rv.resolve(m, lock, lambda s: None)
+    assert kept["rtk"] == lock["rtk"] and kept["ccusage"] == lock["ccusage"]
+    assert rv.fetch_latest("github:rtk-ai/rtk", client=_Client({"tag_name": "v1.1.0"})) == "1.1.0"
+    assert rv.fetch_latest("npm:ccusage", client=_Client({"dist-tags": {"latest": "20.0.48"}})) == "20.0.48"

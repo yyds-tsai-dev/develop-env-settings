@@ -108,4 +108,6 @@ installers:
   - { name: chezmoi, source: "github:twpayne/chezmoi" }
   - { name: uv, source: "github:astral-sh/uv" }
   - { name: bw, source: "npm:@bitwarden/cli" }
+  - { name: ccusage, source: "npm:ccusage" }   # npm global through fnm's Node (26-ccusage)
+  - { name: rtk, source: "github:rtk-ai/rtk" }   # full edition, never rtk-oss or rtk-proxy (35-rtk)
   - { name: statusline, source: "github:yyds-tsai-dev/develop-env-settings", tag_prefix: "statusline-v" }

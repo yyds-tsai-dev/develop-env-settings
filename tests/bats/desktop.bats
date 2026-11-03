@@ -491,10 +491,11 @@ EOF
   [[ "$output" != *cmd.exe* ]]
 }
 
-@test "rendered windows Claude and status line scripts parse in PowerShell" {
+@test "rendered windows Claude, status line, rtk and ccusage scripts parse in PowerShell" {
   command -v pwsh >/dev/null 2>&1 || skip "pwsh not installed"
   init_desktop
-  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl \
+           run_onchange_after_35-rtk.ps1.tmpl run_onchange_after_26-ccusage.ps1.tmpl; do
     f="$(render_for windows "$s")"
     [ -s "$f" ]
     cp "$f" "$f.ps1"

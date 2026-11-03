@@ -2,6 +2,7 @@ resolved_at: '2026-10-20T18:36:09Z'
 versions:
   bat: 0.26.1
   bw: 2026.10.0
+  ccusage: 20.0.48
   chezmoi: 2.73.2
   codebase-memory-mcp: 0.12.1
   codex: 0.163.0
@@ -25,6 +26,7 @@ versions:
   paper-search-mcp: 0.1.4
   poppler: 26.09.0
   ripgrep: 15.2.0
+  rtk: 1.1.0
   semble: 0.7.0
   skill-find-skills: 1.7.4
   statusline: 1.0.0
