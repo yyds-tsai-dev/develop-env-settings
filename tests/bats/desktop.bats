@@ -484,6 +484,7 @@ EOF
     grep -qF "$want" "$SB/win.json" || { echo "windows hook $h: want $want"; false; }
   done
   ! grep -qF '$HOME/.claude/hooks' "$SB/win.json"
+  grep -qF '"command": "rtk hook claude"' "$SB/win.json"   # rtk.exe is on the user PATH: a bare command
   py="$(command -v python3 || command -v python || true)"
   [ -z "$py" ] || "$py" -c 'import json,sys; json.load(open(sys.argv[1]))' "$SB/win.json"
   run chezmoi_iso execute-template "${t/OS/darwin}"
