@@ -300,6 +300,36 @@ EOF
   done
 }
 
+@test "doctor rtk: locked version and Claude hook PASS; wrong version FAILs; no hook or no ccusage WARNs" {
+  v="$(sed -n 's/^  rtk: *//p' "$REPO_ROOT/home/.chezmoidata/versions.yaml")"
+  [ -n "$v" ]
+  # rtk_stub VERSION HOOK_LINE
+  rtk_stub() { stub rtk "case \"\$1\" in --version) echo 'rtk $1' ;; init) echo 'rtk Configuration:'; echo; echo '$2' ;; esac"; }
+  rtk_stub "$v" '[ok] Hook: rtk hook claude (native binary command)'
+  stub ccusage 'echo "ccusage 20.0.48"'
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS rtk"* ]] && [[ "$output" == *"PASS ccusage"* ]]
+  rtk_stub "$v" '[--] Hook: not found'
+  rm "$STUB/ccusage"
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN rtk: rtk init --show reports no Claude hook"* ]]
+  [[ "$output" == *"WARN ccusage: ccusage not on PATH: run chezmoi state delete-bucket"* ]]
+  rtk_stub 0.0.1 '[ok] Hook: rtk hook claude'
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL rtk: rtk is rtk 0.0.1, the Version lock wants $v"* ]]
+  rm "$STUB/rtk"; mkdir -p "$H/.local/state/develop-env/retry"; echo 1 > "$H/.local/state/develop-env/retry/35-rtk"
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL rtk: rtk not on PATH: run $REPO_ROOT/bin/update"* ]]   # a retry is pending: update is enough
+}
+
 @test "cleanup: plain files matching the globs are targets, live env links survive" {
   e="$H/micromamba/envs/cli-tools"; u="$H/.local/share/uv/tools/semble/bin"
   mkdir -p "$H/.local/bin" "$e/bin" "$u"
