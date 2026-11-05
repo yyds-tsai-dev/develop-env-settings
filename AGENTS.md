@@ -37,7 +37,7 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - Codex asks once to re-trust the codebase-memory hooks, which are now bare commands.
 - `~/.local/bin/node` is re-pointed to fnm's default Node 24.
 - The codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades.
-- Codex asks once to trust the new rtk hook (`rtk hook codex`, a PreToolUse Bash hook in `~/.codex/config.toml`). A machine that ran `rtk init -g --codex` by hand still has `~/.codex/hooks.json`; remove it (the repo does not manage it), or Codex warns about loading hooks from both files.
+- Codex asks once to trust the new rtk hook (`rtk hook codex`, a PreToolUse Bash hook in `~/.codex/config.toml`). A machine that ran `rtk init -g --codex` by hand still has `~/.codex/hooks.json`; remove it (the repo does not manage it), or Codex warns about loading hooks from both files. A machine-local `[[hooks.PreToolUse]]` in `config.toml` is replaced by the managed one.
 
 ## Maintaining the repo
 

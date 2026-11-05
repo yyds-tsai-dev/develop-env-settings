@@ -48,7 +48,7 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - On a machine with a working environment, review `chezmoi diff` before the first apply.
 - Agents must not run Bootstrap on a home that has a hold file, or on a shared home in use, without your go-ahead (see [AGENTS.md](AGENTS.md)).
 
-Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare commands); `~/.local/bin/node` is re-pointed to fnm's default Node 24; the codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades. Codex asks once to trust the new rtk hook; remove a `~/.codex/hooks.json` left by a manual `rtk init -g --codex`, or Codex warns about two hook sources.
+Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare commands); `~/.local/bin/node` is re-pointed to fnm's default Node 24; the codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades. Codex asks once to trust the new rtk hook; remove a `~/.codex/hooks.json` left by a manual `rtk init -g --codex`, or Codex warns about two hook sources. A machine-local `[[hooks.PreToolUse]]` in `config.toml` is replaced by the managed one.
 
 ## Daily use
 

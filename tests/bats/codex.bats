@@ -68,13 +68,10 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
   done
   grep -qF '`~/.codex/skills/caveman/SKILL.md`' "$c/AGENTS.md"
   grep -qF '`~/.codex/skills/codex-queue-workflow/SKILL.md`' "$c/AGENTS.md"
-  # rtk: AGENTS.md ends by pointing at ~/.codex/RTK.md through the home dir, as `rtk init -g --codex` does
-  [ "$(tail -n 1 "$c/AGENTS.md")" = "@${dest%/dest}/home/.codex/RTK.md" ]   # render_home's sandbox HOME
-  ! grep -qF '{{' "$c/AGENTS.md"
-  head -n 1 "$c/RTK.md" | grep -qF '<!-- rtk-owned: written by `rtk init --codex`'
-  grep -qx '# Command output' "$c/RTK.md"
-  cmp <(tail -n 8 "$c/RTK.md") "$REPO_ROOT/home/dot_claude/RTK.md"   # same body as Claude's
-  [ ! -e "$c/hooks.json" ]   # the rtk hook lives in config.toml
+  # rtk: AGENTS.md ends with the rtk "Command output" text inline (no @-reference, no ~/.codex/RTK.md)
+  cmp <(tail -n 8 "$c/AGENTS.md") "$REPO_ROOT/home/dot_claude/RTK.md"   # same text as Claude's RTK.md
+  ! grep -q '^@' "$c/AGENTS.md"
+  [ ! -e "$c/RTK.md" ] && [ ! -e "$c/hooks.json" ]   # the rtk hook lives in config.toml
   # roles keep their models and efforts
   grep -qx 'model = "gpt-6-astra"' "$c/agents/deep-reasoner.toml"
   grep -qx 'model_reasoning_effort = "high"' "$c/agents/deep-reasoner.toml"
