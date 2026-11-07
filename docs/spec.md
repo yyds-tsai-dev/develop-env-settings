@@ -79,7 +79,7 @@ GitHub Actions on every push: Ubuntu container as a non-admin user (full Server 
 
 ## Delivery
 
-Work in a clone at `~/develop-env-settings`, branch `init`, worker agents implement, PR with CI green on all three OSes, merge after the person approves. Every push and PR is confirmed with the person first. The repository is public (switched by the person on 2026-10-18).
+Work in a clone at `~/develop-env-settings`; worker agents implement on a branch. The repository has one user, so there are no pull requests (ruling 2026-11-07): push the branch (CI runs on every push, on all three OSes), and once every CI check is green merge it into main with `git merge --no-ff` (message "Merge branch '<name>': ...") and push main. The person agrees before the first push of a branch's work. The repository is public (switched by the person on 2026-10-18).
 
 ## Not applied to the current lab Server
 

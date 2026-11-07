@@ -46,4 +46,5 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - Rollback: `cd "$(chezmoi source-path)/.." && git checkout <rev> -- home/.chezmoidata/versions.yaml && chezmoi apply`.
 - Retrying installs: a failed install script leaves a retry marker with a fresh nonce in `~/.local/state/develop-env/retry/`, so every `bin/update` (Windows: the one-liner) reruns it until it succeeds. To rerun scripts that succeeded earlier (something they installed was removed later): `chezmoi state delete-bucket --bucket=entryState` (run_onchange_ scripts; `--bucket=scriptState` for run_once_), then `bin/update`.
 - Tests: `.tools/bin/bats tests/bats` (set `DEVENV_SKIP_DOCKER=1` to skip the Docker tests) and `uv run --with pytest --with pyyaml --with httpx --with tomlkit pytest tests/py`. Tests use sandbox HOMEs under `/tmp`, never the real home.
-- Commit messages are in English. Push and open PRs only after the person agrees.
+- Commit messages are in English.
+- Merge workflow (ruling 2026-11-07; one user, no pull requests): work on a branch, push it (CI runs on every push, on Ubuntu, macOS and Windows), and once every CI check is green merge it into main with `git merge --no-ff` (message "Merge branch '<name>': ...") and push main. The person agrees before the first push of a branch's work.

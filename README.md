@@ -85,3 +85,5 @@ bin/update
 ```
 
 CI runs the same on Ubuntu, macOS and Windows, plus real Bootstraps: Server in a Docker container, `desktop+server` on a macOS runner and `desktop` on a Windows runner, each ending with `bin/doctor --ci` (or `bin/doctor.ps1 -Ci`) reporting no FAIL. Tests use sandbox HOMEs under `/tmp` and never touch the real home.
+
+Changes go on a branch that is pushed (CI runs on every push) and merged into main with `git merge --no-ff` once every CI check is green; there are no pull requests (see [AGENTS.md](AGENTS.md)).
