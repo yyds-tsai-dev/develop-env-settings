@@ -23,7 +23,7 @@ Bootstrap installs chezmoi and uv into `~/.local/bin`, resolves the Version lock
 | Role | OS | Gets |
 |---|---|---|
 | `server` | Linux x86_64 | Full environment under userland paths |
-| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, rtk, ccusage (Windows: only with a Node install), Claude Code and Codex (same user files, plugins, skills, bundles and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists, and Codex bundle skills are directory junctions) |
+| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, rtk, ccusage (Windows: only with a Node install), zotero-cli, Claude Code and Codex (same user files, plugins, skills, bundles, research add-ons and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists, and Codex bundle skills are directory junctions) |
 | `desktop+server` | macOS | Both, Server tools through Homebrew; zsh (`~/.zshrc` block) starts fish |
 
 A Windows Server use goes through WSL2 with role `server`.
@@ -31,6 +31,7 @@ A Windows Server use goes through WSL2 with role `server`.
 ### Steps only you can do
 
 - `bw login`, `export BW_SESSION=$(bw unlock --raw)`, `bw sync`, then apply again. The first apply on a new machine always skips Secret files.
+- Zotero: create the Bitwarden item `zotero` (folder `develop-env-settings`) with custom fields `api_key` (a key from https://www.zotero.org/settings/keys with library and notes access; write access optional) and `library_id` (your user library ID, shown on that page); the next apply writes `~/.config/zotero-mcp/config.json`.
 - Paste the printed SSH public key at https://github.com/settings/ssh/new.
 - Log in with `claude` and `codex login` (every role).
 - Run any admin-rights commands Bootstrap printed.
@@ -64,6 +65,16 @@ Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare
 
 `bin/capture` runs `chezmoi re-add`, rewrites `desktop/vscode/server-extensions.txt` from `~/.vscode-server/extensions`, and updates the membership of `claude.plugins`, `claude.marketplaces`, `uv_tools`, `cli_tools` and `pdftools` in `home/.chezmoidata/manifest.yaml`. It also compares the manifest `mcp` entries with the user-scope Claude MCP servers (names and commands only, from `~/.claude.json` `mcpServers` or `claude mcp list`) and prints the differences without rewriting them, since their args are templated. It never changes the Version lock.
 
+### Research add-ons
+
+| Add-on | Claude Code | Codex |
+|---|---|---|
+| ARIS ([wanshuiyin/Auto-claude-code-research-in-sleep](https://github.com/wanshuiyin/Auto-claude-code-research-in-sleep), default-branch head, lock `codex-bundle-aris`) | plugin `aris@aris`; its `codex` reviewer MCP server is the bare `aris-codex-mcp` wrapper (starts `server.py` from the plugin's current cache dir, python3 3.9+ or uv's 3.12), and `~/.aris/repo` follows plugin updates | its Codex mirror `skills/skills-codex` as a skill bundle |
+| Claude Scholar ([Galaxy-Dawn/claude-scholar](https://github.com/Galaxy-Dawn/claude-scholar), pinned at `d394fb599ed9`) | 40 allowlisted skills and 4 agents (`kaggle-miner`, `literature-reviewer`, `paper-miner`, `rebuttal-writer`); no hooks, commands or rules | none |
+| Zotero (`zotero-mcp-server[scite]` uv tool: `zotero-cli`, `zotero-mcp`) | `zotero-cli` skill | `zotero-cli` skill in `~/.codex/skills` plus a pointer block in AGENTS.md |
+
+Zotero is used from the shell, not as an MCP server; it reads `~/.config/zotero-mcp/config.json` (a Secret). To bump Claude Scholar, edit its line in `home/.chezmoidata/versions.yaml`: bin/update keeps a pinned value.
+
 ### Machine-local settings
 
 Untracked `*.local` files hold what belongs to one machine: `~/.bashrc.local`, `~/.config/fish/config.local.fish`, `~/.gitconfig.local`. `~/.bashrc.local` is for environment that every bash needs, interactive or not: it is sourced right after the managed PATH block, before the non-interactive return, so scripts, `bash -c`, `bash -lc` and ssh commands see it (for example a hostname-gated `export DREAMPLACE_ROOT=...`). `config.local.fish` is likewise read by every fish. On RHEL-family hosts the managed `~/.bashrc` sources `/etc/bashrc` first, as the stock one does, so site settings (module, EDA setup) still load.
@@ -85,3 +96,5 @@ bin/update
 ```
 
 CI runs the same on Ubuntu, macOS and Windows, plus real Bootstraps: Server in a Docker container, `desktop+server` on a macOS runner and `desktop` on a Windows runner, each ending with `bin/doctor --ci` (or `bin/doctor.ps1 -Ci`) reporting no FAIL. Tests use sandbox HOMEs under `/tmp` and never touch the real home.
+
+Changes go on a branch that is pushed (CI runs on every push) and merged into main with `git merge --no-ff` once every CI check is green; there are no pull requests (see [AGENTS.md](AGENTS.md)).

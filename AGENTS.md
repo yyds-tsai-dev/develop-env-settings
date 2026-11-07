@@ -24,6 +24,7 @@ This repository builds the person's Personal environment on a new machine with o
 Stop and ask; do not attempt these yourself.
 
 - Bitwarden: `bw login`, then `export BW_SESSION=$(bw unlock --raw)`, then `bw sync`, then apply again. The first apply on a new machine always skips the Secret files because `bw` is installed only during that apply.
+- Zotero: create the Bitwarden item `zotero` (folder `develop-env-settings`) with custom fields `api_key` (a key from https://www.zotero.org/settings/keys with library and notes access; write access optional) and `library_id` (your user library ID, shown on that page) once; apply then renders `~/.config/zotero-mcp/config.json`.
 - GitHub SSH key: paste the public key Bootstrap printed at https://github.com/settings/ssh/new.
 - Log in to Claude Code (`claude`) and Codex (`codex login`) on every role.
 - Any admin-rights commands Bootstrap printed (system packages, Homebrew's first install, elevated winget).
@@ -37,6 +38,8 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - Codex asks once to re-trust the codebase-memory hooks, which are now bare commands.
 - `~/.local/bin/node` is re-pointed to fnm's default Node 24.
 - The codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades.
+- ARIS installed by hand (`/aris:setup`): its `codex` MCP server named `python3 <plugin cache dir>/mcp-servers/codex-exec/server.py`; apply replaces it with the bare `aris-codex-mcp`, which follows plugin updates. A hand-made Codex plugin (`codex plugin add aris@aris`) duplicates the managed ARIS skill bundle; remove it with `codex plugin remove aris@aris`.
+- Zotero installed by hand: `zotero-mcp install-skill --target agents --root ~/.codex` wrote `~/.codex/.agents/skills/zotero-cli` and a block in `~/.codex/AGENTS.md`; the managed AGENTS.md now carries the block and the skill lives in `~/.codex/skills/zotero-cli`, so `~/.codex/.agents` can be removed.
 - Codex asks once to trust the new rtk hook (`rtk hook codex`, a PreToolUse Bash hook in `~/.codex/config.toml`). A machine that ran `rtk init -g --codex` by hand still has `~/.codex/hooks.json`; remove it (the repo does not manage it), or Codex warns about loading hooks from both files. A machine-local `[[hooks.PreToolUse]]` in `config.toml` is replaced by the managed one.
 
 ## Maintaining the repo
@@ -46,4 +49,5 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - Rollback: `cd "$(chezmoi source-path)/.." && git checkout <rev> -- home/.chezmoidata/versions.yaml && chezmoi apply`.
 - Retrying installs: a failed install script leaves a retry marker with a fresh nonce in `~/.local/state/develop-env/retry/`, so every `bin/update` (Windows: the one-liner) reruns it until it succeeds. To rerun scripts that succeeded earlier (something they installed was removed later): `chezmoi state delete-bucket --bucket=entryState` (run_onchange_ scripts; `--bucket=scriptState` for run_once_), then `bin/update`.
 - Tests: `.tools/bin/bats tests/bats` (set `DEVENV_SKIP_DOCKER=1` to skip the Docker tests) and `uv run --with pytest --with pyyaml --with httpx --with tomlkit pytest tests/py`. Tests use sandbox HOMEs under `/tmp`, never the real home.
-- Commit messages are in English. Push and open PRs only after the person agrees.
+- Commit messages are in English.
+- Merge workflow (ruling 2026-11-07; one user, no pull requests): work on a branch, push it (CI runs on every push, on Ubuntu, macOS and Windows), and once every CI check is green merge it into main with `git merge --no-ff` (message "Merge branch '<name>': ...") and push main. The person agrees before the first push of a branch's work.

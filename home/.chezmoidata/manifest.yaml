@@ -18,6 +18,9 @@ uv_tools:
   - { name: semble, source: "pypi:semble", spec: "semble[mcp]" }
   - { name: graphifyy, source: "pypi:graphifyy", spec: "graphifyy[mcp]" }
   - { name: paper-search-mcp, source: "pypi:paper-search-mcp", spec: "paper-search-mcp" }
+  # zotero-cli / zotero-mcp (scite extra: no credentials); every role through 32-zotero, which
+  # also installs its zotero-cli skill for Claude and Codex (no Zotero MCP server)
+  - { name: zotero-mcp-server, source: "pypi:zotero-mcp-server", spec: "zotero-mcp-server[scite]" }
 node: { major: 24 }
 mcp:
   - name: mcp-semble
@@ -60,6 +63,7 @@ claude:
     - { name: academic-research-skills, source: none, repo: Imbad0202/academic-research-skills }
     - { name: drawio, source: none, repo: jgraph/drawio-mcp }
     - { name: openai-codex, source: none, repo: openai/codex-plugin-cc }
+    - { name: aris, source: none, repo: wanshuiyin/Auto-claude-code-research-in-sleep }
   plugins:
     - { name: "superpowers@claude-plugins-official", source: none, marketplace: claude-plugins-official }
     - { name: "mattpocock-skills@claude-plugins-official", source: none, marketplace: claude-plugins-official }
@@ -68,6 +72,9 @@ claude:
     - { name: "academic-research-skills@academic-research-skills", source: none, marketplace: academic-research-skills }
     - { name: "drawio@drawio", source: none, marketplace: drawio }
     - { name: "codex@openai-codex", source: none, marketplace: openai-codex }
+    # ARIS: 50-claude also does its /aris:setup (the `codex` MCP server through the managed
+    # aris-codex-mcp wrapper, ~/.aris/repo); its lock is codex-bundle-aris
+    - { name: "aris@aris", source: none, marketplace: aris }
   # Third-party Claude skills, reinstalled from upstream into ~/.claude/skills/<dir>/ (own skills
   # with no upstream are vendored under home/dot_claude/skills/; there are none today).
   # url: fetched as SKILL.md; {ref} is v<version> (lock key `version_from`, default `name`), or main.
@@ -78,6 +85,72 @@ claude:
     - { name: skill-paper-search, source: none, dir: paper-search, version_from: paper-search-mcp, codex: true, url: "https://raw.githubusercontent.com/openags/paper-search-mcp/{ref}/claude-code/SKILL.md" }
     - { name: skill-graphify, source: none, dir: graphify, installer: graphify }   # `graphify install` (graphifyy uv tool)
     - { name: skill-codebase-memory, source: none, dir: codebase-memory, installer: codebase-memory-mcp }
+  # Claude skill bundles: the repo tarball at `ref` ({version} is the lock value).
+  # Only the allowlisted `skills` (whole <skills_dir>/<name>/ dirs) are copied into
+  # ~/.claude/skills/<name>/ and the allowlisted `agents` (<agents_dir>/<name>.md)
+  # into ~/.claude/agents/; nothing else from the repo (hooks, commands, rules,
+  # setup scripts) is used. 50-claude records what it installed in
+  # ~/.local/state/develop-env/claude-bundles/<name> and removes only those
+  # recorded entries when they leave the allowlist. The repo's own agents
+  # (home/dot_claude/agents) are never written.
+  skill_bundles:
+    # Claude Scholar, pinned (source none): bin/update keeps the committed lock; bump it
+    # by editing versions.yaml. Left out on purpose (over-broad triggers): agents
+    # code-reviewer, tdd-guide; skills planning-with-files, daily-coding, bug-detective,
+    # git-workflow, verification-loop.
+    - name: claude-bundle-claude-scholar
+      source: none
+      bundle: claude-scholar
+      repo: Galaxy-Dawn/claude-scholar
+      ref: "{version}"
+      skills_dir: skills
+      agents_dir: agents
+      skills:
+        - agent-identifier
+        - architecture-design
+        - citation-verification
+        - code-review-excellence
+        - command-development
+        - daily-paper-generator
+        - defuddle
+        - doc-coauthoring
+        - expression-skill
+        - frontend-design
+        - hook-development
+        - kaggle-learner
+        - latex-conference-template-organizer
+        - mcp-integration
+        - ml-paper-writing
+        - nature-data
+        - nature-polishing
+        - nature-response
+        - nature-writing
+        - obsidian-kb-artifacts
+        - obsidian-literature-workflow
+        - obsidian-project-kb-core
+        - obsidian-source-ingestion
+        - paper-self-review
+        - plugin-structure
+        - post-acceptance
+        - publication-chart-skill
+        - research-ideation
+        - results-analysis
+        - results-report
+        - review-response
+        - skill-development
+        - skill-improver
+        - skill-quality-reviewer
+        - ui-ux-pro-max
+        - uv-package-manager
+        - webapp-testing
+        - web-design-reviewer
+        - writing-anti-ai
+        - zotero-obsidian-bridge
+      agents:
+        - kaggle-miner
+        - literature-reviewer
+        - paper-miner
+        - rebuttal-writer
 codex:
   # Codex skill bundles: the repo tarball at `ref` ({version} is the lock value) is
   # unpacked into ~/.codex/skill-bundles/<bundle>-<version>/ and each skill is a
@@ -98,6 +171,8 @@ codex:
     - { name: codex-bundle-caveman, source: "github-head:JuliusBrussee/caveman", bundle: caveman, repo: JuliusBrussee/caveman, ref: "{version}", skills: [skills/caveman], claude_plugin: "caveman@caveman", plugin_json: .claude-plugin/plugin.json }
     - { name: codex-bundle-adhd, source: "github-head:UditAkhourii/adhd", bundle: adhd, repo: UditAkhourii/adhd, ref: "{version}", skills: [skills/adhd], claude_plugin: "adhd@adhd", plugin_json: .claude-plugin/plugin.json }
     - { name: codex-bundle-mattpocock-skills, source: "github-head:mattpocock/skills", bundle: mattpocock-skills, repo: mattpocock/skills, ref: "{version}", skills_json: .claude-plugin/plugin.json, claude_plugin: "mattpocock-skills@claude-plugins-official", plugin_json: .claude-plugin/plugin.json }
+    # ARIS's Codex-native mirror (its .codex-plugin/plugin.json "skills" dir); no Codex plugin
+    - { name: codex-bundle-aris, source: "github-head:wanshuiyin/Auto-claude-code-research-in-sleep", bundle: aris, repo: wanshuiyin/Auto-claude-code-research-in-sleep, ref: "{version}", skills_dir: skills/skills-codex, claude_plugin: "aris@aris", plugin_json: .claude-plugin/plugin.json }
 installers:
   - { name: claude, source: none, kind: native-installer }
   - { name: codex, source: "github:openai/codex", tag_prefix: "rust-v", kind: standalone-installer }

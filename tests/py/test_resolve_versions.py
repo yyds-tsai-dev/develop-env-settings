@@ -189,7 +189,7 @@ def test_github_head_bundles_in_real_manifest_resolve_through_resolve():
     m = yaml.safe_load((Path(__file__).resolve().parents[2] / "home/.chezmoidata/manifest.yaml").read_text())
     heads = {b["name"]: b["source"] for b in m["codex"]["skill_bundles"] if b["source"].startswith("github-head:")}
     assert set(heads) == {"codex-bundle-drawio", "codex-bundle-caveman", "codex-bundle-adhd",
-                          "codex-bundle-mattpocock-skills"}
+                          "codex-bundle-mattpocock-skills", "codex-bundle-aris"}
     seen = []
     lock, warns = rv.resolve({"codex": {"skill_bundles": [
         {"name": n, "source": s} for n, s in heads.items()]}}, {}, lambda s: seen.append(s) or "abcdef012345")
@@ -210,3 +210,53 @@ def test_rtk_and_ccusage_are_locked_and_resolve():
     assert kept["rtk"] == lock["rtk"] and kept["ccusage"] == lock["ccusage"]
     assert rv.fetch_latest("github:rtk-ai/rtk", client=_Client({"tag_name": "v1.1.0"})) == "1.1.0"
     assert rv.fetch_latest("npm:ccusage", client=_Client({"dist-tags": {"latest": "20.0.48"}})) == "20.0.48"
+
+
+def test_claude_scholar_bundle_is_pinned_in_the_lock():
+    root = Path(__file__).resolve().parents[2] / "home/.chezmoidata"
+    m = yaml.safe_load((root / "manifest.yaml").read_text())
+    lock = yaml.safe_load((root / "versions.yaml").read_text())["versions"]
+    names = {e["name"] for e in rv.entries(m)}
+    assert "claude-bundle-claude-scholar" in names
+    assert lock["claude-bundle-claude-scholar"] == "d394fb599ed9"
+    # source none: a resolve (every bootstrap, bin/update) keeps the committed pin
+    kept, warns = rv.resolve(m, lock, lambda s: "ffffffffffff")
+    assert kept["claude-bundle-claude-scholar"] == "d394fb599ed9"
+
+
+def test_claude_scholar_allowlist():
+    m = yaml.safe_load((Path(__file__).resolve().parents[2] / "home/.chezmoidata/manifest.yaml").read_text())
+    b, = [x for x in m["claude"]["skill_bundles"] if x["name"] == "claude-bundle-claude-scholar"]
+    assert b["repo"] == "Galaxy-Dawn/claude-scholar" and b["ref"] == "{version}"
+    assert len(b["skills"]) == 40 and len(set(b["skills"])) == 40
+    assert sorted(b["agents"]) == ["kaggle-miner", "literature-reviewer", "paper-miner", "rebuttal-writer"]
+    excluded_skills = {"planning-with-files", "daily-coding", "bug-detective", "git-workflow", "verification-loop"}
+    assert not excluded_skills & set(b["skills"])
+    assert not {"code-reviewer", "tdd-guide"} & set(b["agents"])
+    # never one of the repo's own agents, nor a skill another mechanism installs
+    own = {p.name.split(".")[0] for p in (Path(__file__).resolve().parents[2] / "home/dot_claude/agents").iterdir()}
+    assert own >= {"deep-reasoner", "fast-worker", "researcher", "semble-search", "worker"}
+    assert not own & set(b["agents"])
+    assert not {s["dir"] for s in m["claude"]["skills"]} & set(b["skills"])
+
+
+def test_aris_one_lock_for_both_clients():
+    m = yaml.safe_load((Path(__file__).resolve().parents[2] / "home/.chezmoidata/manifest.yaml").read_text())
+    b, = [x for x in m["codex"]["skill_bundles"] if x["name"] == "codex-bundle-aris"]
+    assert b["source"] == "github-head:wanshuiyin/Auto-claude-code-research-in-sleep"
+    assert b["claude_plugin"] == "aris@aris" and b["skills_dir"] == "skills/skills-codex"
+    assert {"name": "aris", "source": "none", "repo": "wanshuiyin/Auto-claude-code-research-in-sleep"} in m["claude"]["marketplaces"]
+    assert "aris@aris" in {p["name"] for p in m["claude"]["plugins"]}
+    # the ARIS codex server is registered by 50-claude, never a manifest MCP entry
+    assert "mcp-codex" not in {e["name"] for e in m["mcp"]}
+
+
+def test_zotero_uv_tool_with_scite_extra_is_locked():
+    root = Path(__file__).resolve().parents[2] / "home/.chezmoidata"
+    m = yaml.safe_load((root / "manifest.yaml").read_text())
+    lock = yaml.safe_load((root / "versions.yaml").read_text())["versions"]
+    z, = [t for t in m["uv_tools"] if t["name"] == "zotero-mcp-server"]
+    assert z == {"name": "zotero-mcp-server", "source": "pypi:zotero-mcp-server", "spec": "zotero-mcp-server[scite]"}
+    assert lock["zotero-mcp-server"]
+    # zotero is a CLI skill, never an MCP server entry
+    assert not [e for e in m["mcp"] if "zotero" in e["name"]]

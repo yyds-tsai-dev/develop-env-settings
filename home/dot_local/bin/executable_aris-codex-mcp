@@ -1,0 +1,34 @@
+#!/bin/sh
+# aris-codex-mcp: ARIS's Codex reviewer MCP server (the `codex` server its
+# skills call as mcp__codex__codex), started from the current aris@aris plugin
+# root. The root is a versioned cache dir that moves on every plugin update, so
+# Claude Code registers this bare command (50-claude) instead of a path into it.
+# Root: the installPath of aris@aris in ~/.claude/plugins/installed_plugins.json,
+# else ~/.aris/repo. Python: python3 when it is 3.9 or newer, else uv's 3.12.
+# When ~/.aris/repo is missing, dangling or names an older plugin cache dir, it
+# is re-pointed to the current root (an ARIS clone elsewhere is left alone).
+reg="$HOME/.claude/plugins/installed_plugins.json"
+cache="$HOME/.claude/plugins/cache/aris/"
+root=
+[ -f "$reg" ] && root="$(awk 'index($0, "\"aris@aris\": [") { f = 1; next }
+    f && /"installPath":/ { sub(/.*"installPath": *"/, ""); sub(/".*/, ""); print; exit }' "$reg")"
+cur="$(cat "$HOME/.aris/repo" 2>/dev/null)"
+[ -f "$root/mcp-servers/codex-exec/server.py" ] || root="$cur"
+srv="$root/mcp-servers/codex-exec/server.py"
+if [ ! -f "$srv" ]; then
+    echo "aris-codex-mcp: no ARIS plugin found (claude plugin install aris@aris)" >&2
+    exit 1
+fi
+if [ "$cur" != "$root" ]; then
+    case "$cur" in
+        "$cache"*|'') mkdir -p "$HOME/.aris" && printf '%s\n' "$root" > "$HOME/.aris/repo" ;;
+        *) [ -d "$cur" ] || { mkdir -p "$HOME/.aris" && printf '%s\n' "$root" > "$HOME/.aris/repo"; } ;;
+    esac
+fi
+if command -v python3 >/dev/null 2>&1 \
+   && python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; then
+    exec python3 "$srv" "$@"
+fi
+py="$(uv python find 3.12 2>/dev/null)" && [ -n "$py" ] && exec "$py" "$srv" "$@"
+echo "aris-codex-mcp: needs python3 3.9 or newer, or uv with Python 3.12 (uv python install 3.12)" >&2
+exit 1

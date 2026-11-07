@@ -54,15 +54,47 @@ in_box() {
 
 no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
 
+# research add-ons after a server bootstrap (prints one marker line per fact):
+# ARIS plugin, its codex MCP server, Claude Scholar, zotero-cli and its skill.
+ADDONS='export PATH=$HOME/.local/bin:$PATH
+    claude plugin list --json | grep -qF "\"id\": \"aris@aris\"" && echo ARIS-PLUGIN-OK
+    claude mcp get codex | grep -qx "  Command: aris-codex-mcp" && echo ARIS-MCP-WRAPPER
+    root=$(sed -n "s/^ *\"installPath\": *\"\(.*aris\/aris\/[^\"]*\)\".*/\1/p" ~/.claude/plugins/installed_plugins.json | head -n1)
+    [ -f "$root/mcp-servers/codex-exec/server.py" ] && echo ARIS-SERVER-EXISTS
+    [ "$(cat ~/.aris/repo)" = "$root" ] && echo ARIS-REPO-OK
+    claude mcp list 2>/dev/null | grep "^codex:" | grep -q Connected && echo ARIS-MCP-CONNECTED
+    for a in kaggle-miner literature-reviewer paper-miner rebuttal-writer; do [ -s ~/.claude/agents/$a.md ] && echo "SCHOLAR-AGENT $a"; done
+    for k in ml-paper-writing zotero-obsidian-bridge defuddle ui-ux-pro-max citation-verification; do [ -s ~/.claude/skills/$k/SKILL.md ] && echo "SCHOLAR-SKILL $k"; done
+    for x in skills/planning-with-files skills/daily-coding skills/bug-detective skills/git-workflow skills/verification-loop agents/code-reviewer.md agents/tdd-guide.md; do
+      [ -e ~/.claude/$x ] && echo "EXCLUDED-PRESENT $x"; done
+    zotero-cli --help >/dev/null 2>&1 && echo ZOTERO-CLI-OK
+    for d in .claude/skills/zotero-cli .codex/skills/zotero-cli; do [ -s ~/$d/SKILL.md ] && echo "ZOTERO-SKILL $d"; done
+    echo "zotero-blocks=$(grep -c "BEGIN zotero-cli skill" ~/.codex/AGENTS.md)"'
+
+# addons_ok: the ADDONS markers are all in $output.
+addons_ok() {
+  for m in ARIS-PLUGIN-OK ARIS-MCP-WRAPPER ARIS-SERVER-EXISTS ARIS-REPO-OK ARIS-MCP-CONNECTED ZOTERO-CLI-OK zotero-blocks=1; do
+    [[ "$output" == *"$m"* ]] || { echo "missing: $m"; return 1; }
+  done
+  for a in kaggle-miner literature-reviewer paper-miner rebuttal-writer; do [[ "$output" == *"SCHOLAR-AGENT $a"* ]] || return 1; done
+  for k in ml-paper-writing zotero-obsidian-bridge defuddle ui-ux-pro-max citation-verification; do [[ "$output" == *"SCHOLAR-SKILL $k"* ]] || return 1; done
+  for d in .claude/skills/zotero-cli .codex/skills/zotero-cli; do [[ "$output" == *"ZOTERO-SKILL $d"* ]] || return 1; done
+  [[ "$output" != *EXCLUDED-PRESENT* ]]
+}
+
 @test "server bootstrap in container ends with doctor PASS" {
   # Same as the README one-liner: the script arrives on stdin.
-  run in_box 'cat /repo/bootstrap.sh | sh -s -- --source /repo --role server --ci'
+  run in_box "cat /repo/bootstrap.sh | sh -s -- --source /repo --role server --ci; rc=\$?
+    $ADDONS
+    exit \$rc"
   echo "$output"
   [ "$status" -eq 0 ]
   no_fail_lines
-  for c in micromamba_envs cli_tools_linked node_default uv_tools fish_present fisher_tide rtk ccusage; do
+  for c in micromamba_envs cli_tools_linked node_default uv_tools fish_present fisher_tide rtk ccusage \
+           claude_aris claude_bundles zotero_cli zotero_skills; do
     [[ "$output" == *"PASS $c"* ]]
   done
+  addons_ok
 }
 
 @test "npx works from a bare non-interactive PATH after bootstrap" {
@@ -87,6 +119,8 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
     $BOOT >/tmp/1.log 2>&1 || { cat /tmp/1.log; echo 'first bootstrap failed'; exit 1; }
     cm=\$HOME/.local/bin/chezmoi; mm=\$HOME/.local/bin/micromamba
     n1=\$(grep -c PATH ~/.bashrc); e1=\$(\$mm env list); b1=\$(ls -d ~/.dotfiles-backup-* | wc -l)
+    sums() { (cd ~ && find .claude/skills .claude/agents .codex/skills/zotero-cli .aris .local/state/develop-env/claude-bundles -type f 2>/dev/null | sort | xargs sha256sum; \$HOME/.local/bin/claude mcp get codex 2>/dev/null | grep -E 'Command|Args'); }
+    a1=\$(sums)
     d=\$(\$cm diff --no-pager 2>/dev/null); [ -z \"\$d\" ] || { echo \"diff after first: \$d\"; exit 1; }
     sleep 1
     $BOOT >/tmp/2.log 2>&1 || { cat /tmp/2.log; echo 'second bootstrap failed'; exit 1; }
@@ -94,10 +128,13 @@ no_fail_lines() { ! printf '%s\n' "$output" | grep -q '^FAIL '; }
     [ \"\$(grep -c PATH ~/.bashrc)\" = \"\$n1\" ] || { echo 'PATH line count changed'; exit 1; }
     [ \"\$(\$mm env list)\" = \"\$e1\" ] || { echo 'micromamba env list changed'; exit 1; }
     [ \"\$(ls -d ~/.dotfiles-backup-* | wc -l)\" = \"\$b1\" ] || { echo 'second run made a backup'; exit 1; }
+    [ \"\$(sums)\" = \"\$a1\" ] || { echo 'skills, agents, ARIS or the codex MCP entry changed'; diff <(echo \"\$a1\") <(sums); exit 1; }
+    $ADDONS
     echo SECOND-OK"
   echo "$output"
   [ "$status" -eq 0 ]
   [[ "$output" == *SECOND-OK* ]]
+  addons_ok
 }
 
 @test "hold file: no managed dotfile written" {

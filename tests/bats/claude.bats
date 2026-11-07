@@ -111,7 +111,7 @@ sys_path() {
   local t p
   mkdir -p "$SB/sys"
   for t in sh bash env awk sed grep cat cp mv rm mkdir mktemp cmp chmod tr head tail \
-           date dirname basename uname printf ls touch sort cut wc tee id find xargs; do
+           date dirname basename uname printf ls touch sort cut wc tee id find xargs tar gzip diff; do
     p="$(command -v "$t" 2>/dev/null)" && [ -x "$p" ] && ln -sf "$p" "$SB/sys/$t"
   done
   echo "$SB/sys"
@@ -352,6 +352,9 @@ EOF
   done
   for m2 in $(manifest_mkts); do grep -qF "& claude plugin marketplace update '$m2'" "$f"; done
   grep -qF '# Codex bundle locks' "$f"
+  # ARIS: server.py from the current installPath, re-registered on every run
+  grep -qF "Set-McpServer 'codex' @(\$py, \$arisSrv)" "$f"
+  grep -qF "plugins.'aris@aris'" "$f"
   if command -v pwsh >/dev/null 2>&1; then
     # -File (not -Command): -Command does not pass trailing words as $args
     cat > "$SB/parse.ps1" <<'PS'
@@ -491,6 +494,34 @@ EOF
   stub npx "echo \"npx \$*\" >> '$SB/calls'"
   # curl -fsSL --retry 3 -o FILE URL: write a fake skill
   stub curl 'while [ $# -gt 1 ]; do [ "$1" = -o ] && { echo "skill from $3" > "$2"; exit 0; }; shift; done; exit 1'
+  # uv python find 3.12: the Python ARIS's server falls back to without python3
+  stub uv "echo \"uv \$*\" >> '$SB/calls'; [ \"\$1 \$2\" = 'python find' ] && echo '$STUB/python3.12'; exit 0"
+  fake_aris 0123456789ab
+  # the Claude Scholar tarball for a script rendered to the usual path
+  [ -f "$SB/claude.sh" ] && fake_scholar "$SB/claude.sh"
+  true
+}
+
+# fake_aris VERSION: aris@aris installed at the cache dir for VERSION (as
+# installed_plugins.json records it), with its codex-exec server.py.
+fake_aris() {
+  ARIS_ROOT="$SB_HOME/.claude/plugins/cache/aris/aris/$1"
+  mkdir -p "$ARIS_ROOT/mcp-servers/codex-exec"
+  echo 'import sys; print("aris server", *sys.argv[1:])' > "$ARIS_ROOT/mcp-servers/codex-exec/server.py"
+  cat > "$SB_HOME/.claude/plugins/installed_plugins.json" <<EOF
+{
+  "version": 2,
+  "plugins": {
+    "aris@aris": [
+      {
+        "scope": "user",
+        "installPath": "$ARIS_ROOT",
+        "version": "$1"
+      }
+    ]
+  }
+}
+EOF
 }
 
 run_script() {
@@ -616,6 +647,219 @@ EOF
   grep -v '^drawio:' "$SB/mcplist" > "$SB/m2"; mv "$SB/m2" "$SB/mcplist"
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"not registered: drawio: run $REPO_ROOT/bin/update (or re-run bootstrap)"* ]]
+}
+
+@test "ARIS: codex MCP server is the bare wrapper; ~/.aris/repo follows the plugin root across versions, a clone is kept" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  grep -qE '^ *mcp_server codex aris-codex-mcp$' "$f"
+  run_script "$f"
+  echo "$output"; cat "$SB/calls"
+  [ "$status" -eq 0 ]
+  grep -qx 'mcp add -s user codex -- aris-codex-mcp' "$SB/calls"
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  # a plugin update moves the root: ~/.aris/repo follows, the registration is unchanged
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcp/codex"
+  old="$ARIS_ROOT"; fake_aris fedcba987654; rm -rf "$old"
+  : > "$SB/calls"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  ! grep -q 'mcp add -s user codex' "$SB/calls"
+  ! grep -q 'mcp remove -s user codex' "$SB/calls"
+  # an old hand-made registration (python3 <abs path>/server.py) is replaced
+  printf '  Command: python3\n  Args: %s/mcp-servers/codex-exec/server.py\n' "$old" > "$SB/mcp/codex"
+  : > "$SB/calls"
+  run_script "$f"
+  grep -qx 'mcp remove -s user codex' "$SB/calls"
+  grep -qx 'mcp add -s user codex -- aris-codex-mcp' "$SB/calls"
+  # an ARIS clone outside the plugin cache is never overwritten
+  mkdir -p "$SB_HOME/src/aris"; echo "$SB_HOME/src/aris" > "$SB_HOME/.aris/repo"
+  fake_aris 111111111111
+  run_script "$f"
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$SB_HOME/src/aris" ]
+  # no plugin installed: a warning and a retry marker, no registration
+  rm -f "$SB_HOME/.claude/plugins/installed_plugins.json"; rm -f "$SB/mcp/codex"
+  : > "$SB/calls"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aris@aris is not installed"* ]]
+  ! grep -q 'mcp add -s user codex' "$SB/calls"
+  [ -s "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+}
+
+@test "aris-codex-mcp starts server.py from the current plugin root and re-points a stale ~/.aris/repo" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  command -v python3 >/dev/null 2>&1 || skip "python3 not installed"
+  run render_home server
+  dest="${lines[${#lines[@]}-1]}"
+  w="$dest/.local/bin/aris-codex-mcp"
+  [ -x "$w" ]
+  sh -n "$w"
+  ! grep -qE '/home/|/ldaphome|/Users/' "$w"
+  fake_aris aaaaaaaaaaaa
+  mkdir -p "$SB_HOME/.aris"; echo "$SB_HOME/.claude/plugins/cache/aris/aris/000000000000" > "$SB_HOME/.aris/repo"
+  HOME="$SB_HOME" PATH="/usr/bin:/bin" run "$w" --flag
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "aris server --flag" ]
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  # without python3, uv's 3.12 runs it
+  stub uv "[ \"\$1 \$2 \$3\" = 'python find 3.12' ] && echo '$(command -v python3)'"
+  mkdir -p "$SB/nopy"; for c in sh awk cat mkdir; do ln -s "$(command -v $c)" "$SB/nopy/$c"; done
+  HOME="$SB_HOME" PATH="$STUB:$SB/nopy" run "$w"
+  echo "$output"
+  [ "$output" = "aris server" ]
+  # no plugin and no ~/.aris/repo: exit 1 with the install hint
+  rm -rf "$SB_HOME/.claude/plugins" "$SB_HOME/.aris"
+  HOME="$SB_HOME" PATH="/usr/bin:/bin" run "$w"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"claude plugin install aris@aris"* ]]
+}
+
+@test "doctor claude_aris: PASS with the wrapper and an existing server.py, WARN otherwise" {
+  fake_aris 0123456789ab
+  printf '[\n  {\n    "id": "aris@aris",\n    "version": "0123456789ab",\n    "enabled": true,\n    "installPath": "%s"\n  }\n]\n' "$ARIS_ROOT" > "$SB/plugins.json"
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcpget"
+  cat > "$STUB/claude" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp get") [ -s "$SB/mcpget" ] || exit 1; cat "$SB/mcpget" ;;
+esac
+EOF
+  chmod +x "$STUB/claude"
+  stub aris-codex-mcp 'exit 0'
+  mkdir -p "$SB_HOME/.aris"; echo "$ARIS_ROOT" > "$SB_HOME/.aris/repo"
+  doc() { DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci; echo "$output"; }
+  doc
+  [[ "$output" == *"PASS claude_aris"* ]]
+  # a registration naming a removed plugin version WARNs (never FAILs)
+  printf '  Command: python3\n  Args: %s/gone/mcp-servers/codex-exec/server.py\n' "$SB_HOME" > "$SB/mcpget"
+  doc
+  [[ "$output" == *"WARN claude_aris: MCP server codex starts $SB_HOME/gone/mcp-servers/codex-exec/server.py, which does not exist"* ]]
+  : > "$SB/mcpget"
+  doc
+  [[ "$output" == *"WARN claude_aris: MCP server codex (ARIS reviewer) not registered"* ]]
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcpget"; rm -rf "$SB_HOME/.aris"
+  doc
+  [[ "$output" == *"WARN claude_aris: ~/.aris/repo is missing"* ]]
+  sed 's/"enabled": true/"enabled": false/' "$SB/plugins.json" > "$SB/p.new" && mv "$SB/p.new" "$SB/plugins.json"
+  doc
+  [[ "$output" == *"WARN claude_aris: aris@aris is not installed and enabled"* ]]
+  ! printf '%s\n' "$output" | grep -q '^FAIL claude_aris'
+}
+
+# fake_scholar SCRIPT: a fixture repo for the rendered SCRIPT's cbundle line
+# (every allowlisted skill and agent, the excluded ones, and a `worker` agent
+# like this repo's own), served by a stub curl as the codeload tarball; other
+# URLs get a fake skill. Sets SCH_SKILLS / SCH_AGENTS; curl logs to $SB/curl.log.
+fake_scholar() {
+  capture() { SCH_REPO="$2"; SCH_SKILLS="$7"; SCH_AGENTS="$8"; }
+  eval "$(grep '^cbundle ' "$1" | sed 's/^cbundle/capture/')"
+  unset -f capture
+  r="$SB/scholar/top"
+  for x in $SCH_SKILLS planning-with-files daily-coding bug-detective git-workflow verification-loop; do
+    mkdir -p "$r/skills/$x/references"; echo "$x" > "$r/skills/$x/SKILL.md"; echo ref > "$r/skills/$x/references/a.md"
+  done
+  mkdir -p "$r/agents" "$r/hooks" "$r/commands"
+  for x in $SCH_AGENTS code-reviewer tdd-guide worker; do echo "upstream $x" > "$r/agents/$x.md"; done
+  echo hook > "$r/hooks/h.js"; echo cmd > "$r/commands/c.md"
+  cat > "$STUB/curl" <<EOF
+#!/bin/sh
+while [ \$# -gt 1 ]; do [ "\$1" = -o ] && { out="\$2"; url="\$3"; break; }; shift; done
+echo "\$url" >> "$SB/curl.log"
+case "\$url" in
+  https://codeload.github.com/$SCH_REPO/tar.gz/*) tar -czf "\$out" -C "$SB/scholar" top ;;
+  *) echo "skill from \$url" > "\$out" ;;
+esac
+EOF
+  chmod +x "$STUB/curl"
+}
+
+@test "Claude Scholar: only the allowlist at the pinned SHA, repo agents never written, only recorded entries removed" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  fake_scholar "$f"
+  grep -q "^cbundle 'claude-bundle-claude-scholar' 'Galaxy-Dawn/claude-scholar' '$(lock claude-bundle-claude-scholar)' " "$f"
+  [ "$(lock claude-bundle-claude-scholar)" = d394fb599ed9 ]
+  [ "$(echo $SCH_SKILLS | wc -w)" -eq 40 ] && [ "$(echo $SCH_AGENTS | wc -w)" -eq 4 ]
+  A="$SB_HOME/.claude/agents"; S="$SB_HOME/.claude/skills"
+  mkdir -p "$A" "$S/defuddle" "$S/writing-anti-ai" "$S/my-own"
+  echo "repo worker" > "$A/worker.md"; echo mine > "$S/my-own/SKILL.md"
+  cp -R "$SB/scholar/top/skills/defuddle/." "$S/defuddle/"          # hand-installed, identical: adopted
+  echo "edited by hand" > "$S/writing-anti-ai/SKILL.md"             # differs: moved aside
+  run_script "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *warning* ]]
+  grep -qx "https://codeload.github.com/Galaxy-Dawn/claude-scholar/tar.gz/d394fb599ed9" "$SB/curl.log"
+  for x in $SCH_SKILLS; do [ -f "$S/$x/SKILL.md" ] && [ -f "$S/$x/references/a.md" ] || { echo "skill $x missing"; false; }; done
+  for x in $SCH_AGENTS; do [ "$(cat "$A/$x.md")" = "upstream $x" ]; done
+  for x in planning-with-files daily-coding bug-detective git-workflow verification-loop; do [ ! -e "$S/$x" ]; done
+  for x in code-reviewer tdd-guide; do [ ! -e "$A/$x.md" ]; done
+  [ "$(cat "$A/worker.md")" = "repo worker" ]
+  [ ! -e "$SB_HOME/.claude/hooks/h.js" ] && [ ! -e "$SB_HOME/.claude/commands" ]
+  [ "$(cat "$S/writing-anti-ai/SKILL.md")" = writing-anti-ai ]
+  grep -qx 'edited by hand' "$SB_HOME"/.claude/.devenv-replaced/writing-anti-ai.*/SKILL.md
+  st="$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  [ "$(head -n1 "$st")" = "version d394fb599ed9" ]
+  [ "$(grep -c '^skill ' "$st")" -eq 40 ] && [ "$(grep -c '^agent ' "$st")" -eq 4 ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  # rerun: the record matches, nothing fetched
+  : > "$SB/curl.log"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  ! grep -q codeload "$SB/curl.log"
+  # a skill and an agent leave the allowlist: removed (they were recorded); my-own stays
+  sed "s/^\(cbundle .*\) 'agent-identifier \(.*\)' 'kaggle-miner \(.*\)'$/\1 '\2' '\3'/" "$f" > "$f.new" && mv "$f.new" "$f"
+  grep -q "^cbundle .* 'architecture-design .*' 'literature-reviewer " "$f"
+  run_script "$f"
+  echo "$output"
+  [ ! -e "$S/agent-identifier" ] && [ ! -e "$A/kaggle-miner.md" ]
+  [ -f "$S/my-own/SKILL.md" ] && [ "$(cat "$A/worker.md")" = "repo worker" ]
+  ! grep -qx 'skill agent-identifier' "$st"
+  # an allowlist naming one of the repo's own agents never writes it
+  sed "s/^\(cbundle .*\) 'literature-reviewer \(.*\)'$/\1 'worker literature-reviewer \2'/" "$f" > "$f.new" && mv "$f.new" "$f"
+  run_script "$f"
+  echo "$output"
+  [[ "$output" == *"agent worker is one of this repo's own agents; not installed"* ]]
+  [ "$(cat "$A/worker.md")" = "repo worker" ]
+  ! grep -qx 'agent worker' "$st"
+}
+
+@test "Claude Scholar: the rendered allowlist excludes the over-broad entries and the repo's own agents" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_scholar "$f"
+  own="$(sed -n "s/^OWN_AGENTS='\(.*\)'$/\1/p" "$f")"
+  for a in deep-reasoner fast-worker researcher semble-search worker; do [[ " $own " == *" $a "* ]]; done
+  for x in planning-with-files daily-coding bug-detective git-workflow verification-loop; do [[ " $SCH_SKILLS " != *" $x "* ]]; done
+  for x in code-reviewer tdd-guide $own; do [[ " $SCH_AGENTS " != *" $x "* ]]; done
+  # the pin is in the script text, so a changed lock reruns it
+  grep -qx "# Claude skill bundle locks: claude-bundle-claude-scholar=$(lock claude-bundle-claude-scholar)" "$f"
+}
+
+@test "doctor claude_bundles: PASS at the locked SHA with every allowlisted entry, WARN otherwise" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  doc() { DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci; echo "$output"; }
+  doc
+  [[ "$output" == *"PASS claude_bundles"* ]]
+  rm -f "$SB_HOME/.claude/agents/paper-miner.md"; rm -rf "$SB_HOME/.claude/skills/defuddle"
+  doc
+  [[ "$output" == *"WARN claude_bundles: Claude skill bundle entries missing: skill:defuddle agent:paper-miner"* ]]
+  st="$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  sed 's/^version .*/version 000000000000/' "$st" > "$st.new" && mv "$st.new" "$st"
+  doc
+  [[ "$output" == *"claude-bundle-claude-scholar(installed 000000000000, lock d394fb599ed9)"* ]]
+  ! printf '%s\n' "$output" | grep -q '^FAIL claude_bundles'
 }
 
 # bats test_tags=docker

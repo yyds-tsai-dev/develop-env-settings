@@ -1,0 +1,59 @@
+{{- if ne .chezmoi.os "windows" -}}
+{{- $zv := index .versions "zotero-mcp-server" | default "" -}}
+{{- $spec := "" }}{{ range .uv_tools }}{{ if eq .name "zotero-mcp-server" }}{{ $spec = .spec }}{{ end }}{{ end -}}
+#!/bin/sh
+# Every role off Windows (Windows runs the PowerShell twin). Zotero from the
+# shell: the zotero-mcp-server uv tool ({{ $spec }}=={{ $zv }}; zotero-cli and
+# zotero-mcp in ~/.local/bin; on a Server 30-uv-tools already installed it)
+# and its zotero-cli skill for Claude Code (~/.claude/skills/zotero-cli) and
+# Codex (~/.codex/skills/zotero-cli, the dir Codex loads skills from). The
+# skill comes from `zotero-mcp install-skill` run against a scratch root, so it
+# never edits the managed ~/.codex/AGENTS.md (which carries the zotero-cli
+# pointer block itself); a new version's skill replaces the old copies. No
+# Zotero MCP server is registered. The library key is a Secret
+# (~/.config/zotero-mcp/config.json from Bitwarden). Warns and exits 0 on any
+# failure; a failure leaves a retry marker with a fresh nonce, so the next
+# apply (bin/update) reruns this script; success removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "32-zotero") }}
+# Locks: zotero-mcp-server={{ $zv }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "32-zotero" }}
+retry() { warn "$*"; retry_mark; exit 0; }
+
+command -v uv >/dev/null 2>&1 || retry "uv missing; skipping zotero-mcp-server (bin/update retries)"
+ZV={{ $zv | squote }}
+SPEC={{ $spec | squote }}
+if ! uv tool list 2>/dev/null | grep -qx "zotero-mcp-server v${ZV:-.*}"; then
+    if [ -n "$ZV" ]; then
+        uv tool install --quiet --python 3.12 "$SPEC==$ZV" \
+            || { warn "uv tool install $SPEC==$ZV failed; retrying unpinned"
+                 uv tool install --quiet --python 3.12 "$SPEC"; } \
+            || retry "uv tool install $SPEC failed (bin/update retries)"
+    else
+        uv tool install --quiet --python 3.12 "$SPEC" || retry "uv tool install $SPEC failed (bin/update retries)"
+    fi
+fi
+command -v zotero-mcp >/dev/null 2>&1 || retry "zotero-mcp not on PATH after the install (bin/update retries)"
+
+# --- zotero-cli skill, one copy per client ---
+tmp="$(mktemp -d)" || retry "mktemp failed"
+if ! (cd "$tmp" && zotero-mcp install-skill --target agents --root "$tmp" --force >"$tmp/log" 2>&1) \
+   || [ ! -f "$tmp/.agents/skills/zotero-cli/SKILL.md" ]; then
+    log="$(tail -n 3 "$tmp/log" 2>/dev/null)"; rm -rf "$tmp"
+    retry "zotero-mcp install-skill failed: $log"
+fi
+src="$tmp/.agents/skills/zotero-cli"
+failed=
+for dst in "$HOME/.claude/skills/zotero-cli" "$HOME/.codex/skills/zotero-cli"; do
+    diff -r "$src" "$dst" >/dev/null 2>&1 && continue
+    { mkdir -p "${dst%/*}" && rm -rf "$dst.devenv-new" && cp -R "$src" "$dst.devenv-new" \
+      && rm -rf "$dst" && mv "$dst.devenv-new" "$dst"; } || { warn "cannot install $dst"; failed=1; }
+done
+rm -rf "$tmp"
+[ -z "$failed" ] || retry "the zotero-cli skill is not installed everywhere (bin/update retries)"
+retry_clear
+exit 0
+{{- end }}

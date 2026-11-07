@@ -14,6 +14,9 @@ README.md
 {{ if ne .chezmoi.os "darwin" }}
 .zshrc
 {{ end }}
+{{ if eq .chezmoi.os "windows" }}
+.local/bin/aris-codex-mcp
+{{ end }}
 {{ if not .isDesktop }}
 .config/desktop
 .wezterm.lua
@@ -25,6 +28,9 @@ README.md
 {{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".config/paper-search-mcp/.env" "item" "paper-search" "fields" (list "ieee_api_key" "unpaywall_email"))) }}
 .config/paper-search-mcp/.env
 {{   end }}
+{{ end }}
+{{ if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".config/zotero-mcp/config.json" "item" "zotero" "fields" (list "api_key" "library_id"))) }}
+.config/zotero-mcp/config.json
 {{ end }}
 {{ if .isDesktop }}
 {{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
