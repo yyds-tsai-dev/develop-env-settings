@@ -161,8 +161,10 @@ if (Test-Cmd 'graphify') {
 {{- range glob (joinPath .chezmoi.sourceDir "dot_claude/agents/*") }}{{ $own = append $own (base . | trimSuffix ".tmpl" | trimSuffix ".md") }}{{ end }}
 $ownAgents = @({{ range $i, $a := $own }}{{ if $i }}, {{ end }}{{ $a | squote }}{{ end }})
 $cbState = Join-Path $HOME '.local\state\develop-env\claude-bundles'
-$cbTar = Join-Path $env:SystemRoot 'System32\tar.exe'
-if (-not (Test-Path $cbTar)) { $cbTar = 'tar' }
+# Windows' own tar (bsdtar, System32) handles drive paths; elsewhere (no
+# SystemRoot, e.g. the PowerShell tests on Linux) the tar on PATH.
+$cbTar = 'tar'
+if ($env:SystemRoot -and (Test-Path (Join-Path $env:SystemRoot 'System32\tar.exe'))) { $cbTar = Join-Path $env:SystemRoot 'System32\tar.exe' }
 # Test-SameTree A B: the two files, or the two dirs' file sets and contents, are identical.
 function Test-SameTree([string]$A, [string]$B) {
     if (-not (Test-Path -LiteralPath $B)) { return $false }
@@ -352,7 +354,7 @@ if ($claudeOk) {
     # Python 3.9+: python3 or python (.exe), else uv's 3.12 (installed when missing).
     $arisRoot = ''
     try {
-        $reg = Get-Content -Raw (Join-Path $HOME '.claude\plugins\installed_plugins.json') | ConvertFrom-Json
+        $reg = Get-Content -Raw -ErrorAction Stop (Join-Path $HOME '.claude\plugins\installed_plugins.json') | ConvertFrom-Json
         $arisRoot = "$(@($reg.plugins.'aris@aris')[0].installPath)"
     } catch { }
     $arisSrv = if ($arisRoot) { Join-Path $arisRoot 'mcp-servers\codex-exec\server.py' } else { '' }
@@ -370,7 +372,8 @@ if ($claudeOk) {
         $py = ''
         foreach ($c in @('python3', 'python')) {
             $src = (Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-            if ($src -and $src -match '\.exe$') {
+            # on Windows only an .exe (python3.exe may be the Store alias stub, which fails the check)
+            if ($src -and ($src -match '\.exe$' -or $env:OS -ne 'Windows_NT')) {
                 & $src -c 'import sys; sys.exit(sys.version_info < (3, 9))' *> $null
                 if ($LASTEXITCODE -eq 0) { $py = $src; break }
             }

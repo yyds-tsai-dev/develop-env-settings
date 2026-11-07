@@ -569,15 +569,30 @@ STUBEOF
   chmod +x "$STUB/claude" "$STUB/uvx" "$STUB/codebase-memory-mcp"
   echo 'exit 0' > "$STUB/npx.ps1"   # npm's shim, as on a Windows machine with its own Node
   printf '#!/bin/sh\necho "cmd $*" >> "%s/calls"\nexit 0\n' "$SB" > "$STUB/cmd"; chmod +x "$STUB/cmd"
+  printf '#!/bin/sh\nexit 0\n' > "$STUB/python3"; chmod +x "$STUB/python3"   # passes the 3.9+ check
+  # aris@aris installed (ARIS codex MCP server); the Claude Scholar tarball holds every allowlisted entry
+  aris="$SB_HOME/.claude/plugins/cache/aris/aris/0123456789ab"; mkdir -p "$aris/mcp-servers/codex-exec"
+  : > "$aris/mcp-servers/codex-exec/server.py"
+  printf '{"plugins": {"aris@aris": [{"installPath": "%s"}]}}\n' "$aris" > "$SB_HOME/.claude/plugins/installed_plugins.json"
+  awk '/^  skill_bundles:/ { b = 1 } /^codex:/ { b = 0 } b && /^      skills:/ { k = "s" } b && /^      agents:/ { k = "a" }
+       b && /^        - / { print k, $2 }' "$REPO_ROOT/home/.chezmoidata/manifest.yaml" |
+  while read -r k x; do
+    if [ "$k" = s ]; then mkdir -p "$SB/sch/top/skills/$x"; echo "$x" > "$SB/sch/top/skills/$x/SKILL.md"
+    else mkdir -p "$SB/sch/top/agents"; echo "$x" > "$SB/sch/top/agents/$x.md"; fi
+  done
+  tar -czf "$SB/scholar.tgz" -C "$SB/sch" top
   # offline: skills come from a stub web request; paths arrive through the environment
   cat > "$SB/run.ps1" <<'PSEOF'
 $env:PATH = $env:T_STUB + [IO.Path]::PathSeparator + '/usr/bin' + [IO.Path]::PathSeparator + '/bin'
 if (Get-Command graphify -ErrorAction SilentlyContinue) { 'SKIPTEST graphify on PATH'; exit 0 }
-function Invoke-WebRequest { param([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile) Set-Content -Path $OutFile -Value "skill from $Uri" }
+function Invoke-WebRequest {
+    param([switch]$UseBasicParsing, $TimeoutSec, $Uri, $OutFile)
+    if ($Uri -like 'https://codeload.github.com/*') { Copy-Item $env:T_TGZ $OutFile } else { Set-Content -Path $OutFile -Value "skill from $Uri" }
+}
 & $env:T_SCRIPT
 exit $LASTEXITCODE
 PSEOF
-  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$SB/claude.ps1" run pwsh -NoProfile -File "$SB/run.ps1"
+  HOME="$SB_HOME" T_STUB="$STUB" T_SCRIPT="$SB/claude.ps1" T_TGZ="$SB/scholar.tgz" run pwsh -NoProfile -File "$SB/run.ps1"
   echo "$output"; cat "$SB/calls"
   [[ "$output" != *SKIPTEST* ]] || skip "${output#SKIPTEST }"
   [ "$status" -eq 0 ]
@@ -589,6 +604,11 @@ PSEOF
   [ "$(grep -n '^cmd /c npx -y @next-ai-drawio/mcp-server@' "$SB/calls" | cut -d: -f1)" -lt "$(grep -n '^mcp add -s user drawio' "$SB/calls" | cut -d: -f1)" ]
   [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
   [ -s "$SB_HOME/.claude/settings.json" ]
+  grep -qx "mcp add -s user codex -- $STUB/python3 $aris/mcp-servers/codex-exec/server.py" "$SB/calls"
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$aris" ]
+  for a in kaggle-miner literature-reviewer paper-miner rebuttal-writer; do [ -s "$SB_HOME/.claude/agents/$a.md" ]; done
+  [ -s "$SB_HOME/.claude/skills/defuddle/SKILL.md" ]
+  [ "$(grep -c '^skill ' "$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar")" -eq 40 ]
 }
 
 @test "doctor.ps1 Codex checks on a desktop expect only the servers and skills present there" {

@@ -746,7 +746,7 @@ EOF
   printf '  Command: aris-codex-mcp\n' > "$SB/mcpget"; rm -rf "$SB_HOME/.aris"
   doc
   [[ "$output" == *"WARN claude_aris: ~/.aris/repo is missing"* ]]
-  sed -i 's/"enabled": true/"enabled": false/' "$SB/plugins.json"
+  sed 's/"enabled": true/"enabled": false/' "$SB/plugins.json" > "$SB/p.new" && mv "$SB/p.new" "$SB/plugins.json"
   doc
   [[ "$output" == *"WARN claude_aris: aris@aris is not installed and enabled"* ]]
   ! printf '%s\n' "$output" | grep -q '^FAIL claude_aris'
@@ -815,7 +815,7 @@ EOF
   [ "$status" -eq 0 ]
   ! grep -q codeload "$SB/curl.log"
   # a skill and an agent leave the allowlist: removed (they were recorded); my-own stays
-  sed -i "s/^\(cbundle .*\) 'agent-identifier \(.*\)' 'kaggle-miner \(.*\)'$/\1 '\2' '\3'/" "$f"
+  sed "s/^\(cbundle .*\) 'agent-identifier \(.*\)' 'kaggle-miner \(.*\)'$/\1 '\2' '\3'/" "$f" > "$f.new" && mv "$f.new" "$f"
   grep -q "^cbundle .* 'architecture-design .*' 'literature-reviewer " "$f"
   run_script "$f"
   echo "$output"
@@ -823,7 +823,7 @@ EOF
   [ -f "$S/my-own/SKILL.md" ] && [ "$(cat "$A/worker.md")" = "repo worker" ]
   ! grep -qx 'skill agent-identifier' "$st"
   # an allowlist naming one of the repo's own agents never writes it
-  sed -i "s/^\(cbundle .*\) 'literature-reviewer \(.*\)'$/\1 'worker literature-reviewer \2'/" "$f"
+  sed "s/^\(cbundle .*\) 'literature-reviewer \(.*\)'$/\1 'worker literature-reviewer \2'/" "$f" > "$f.new" && mv "$f.new" "$f"
   run_script "$f"
   echo "$output"
   [[ "$output" == *"agent worker is one of this repo's own agents; not installed"* ]]
@@ -855,7 +855,8 @@ EOF
   rm -f "$SB_HOME/.claude/agents/paper-miner.md"; rm -rf "$SB_HOME/.claude/skills/defuddle"
   doc
   [[ "$output" == *"WARN claude_bundles: Claude skill bundle entries missing: skill:defuddle agent:paper-miner"* ]]
-  sed -i 's/^version .*/version 000000000000/' "$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  st="$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  sed 's/^version .*/version 000000000000/' "$st" > "$st.new" && mv "$st.new" "$st"
   doc
   [[ "$output" == *"claude-bundle-claude-scholar(installed 000000000000, lock d394fb599ed9)"* ]]
   ! printf '%s\n' "$output" | grep -q '^FAIL claude_bundles'
