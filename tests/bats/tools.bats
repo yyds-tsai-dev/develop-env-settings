@@ -26,7 +26,8 @@ stub() { printf '#!/bin/sh\n%s\n' "$2" > "$STUB/$1"; chmod +x "$STUB/$1"; }
 @test "rendered install scripts parse" {
   for s in run_once_before_00-prereqs.sh.tmpl run_onchange_after_10-micromamba-envs.sh.tmpl \
            run_onchange_after_15-symlinks.sh.tmpl run_onchange_after_20-node.sh.tmpl \
-           run_onchange_after_30-uv-tools.sh.tmpl; do
+           run_onchange_after_26-ccusage.sh.tmpl run_onchange_after_30-uv-tools.sh.tmpl \
+           run_onchange_after_35-rtk.sh.tmpl; do
     f="$(render "$s")"
     [ -s "$f" ]
     head -n1 "$f" | grep -q '^#!/bin/sh'
@@ -146,6 +147,79 @@ EOF
   grep -q 'paper-search-mcp==0.1.4' "$f"
 }
 
+# rtk_release DIR [BAD]: a fake rtk release (tarball + checksums.txt) in DIR and
+# a curl stub serving it; BAD makes checksums.txt list a wrong sha256.
+rtk_release() {
+  local d="$1" a=rtk-x86_64-unknown-linux-musl.tar.gz sum
+  mkdir -p "$d/src"
+  printf '#!/bin/sh\necho "rtk 1.1.0"\n' > "$d/src/rtk"; chmod +x "$d/src/rtk"
+  tar -czf "$d/$a" -C "$d/src" rtk
+  sum="$(sha256sum "$d/$a" | cut -d' ' -f1)"
+  [ -n "${2:-}" ] && sum="$(printf '%064d' 0)"
+  printf '%s  rtk-oss-x86_64-unknown-linux-musl.tar.gz\n%s  %s\n' "$(printf '%064d' 1)" "$sum" "$a" > "$d/checksums.txt"
+  cat > "$STUB/curl" <<STUB
+#!/bin/sh
+out=; prev=; url=
+for x in "\$@"; do [ "\$prev" = -o ] && out="\$x"; prev="\$x"; url="\$x"; done
+echo "\$url" >> "$d/urls"
+cp "$d/\${url##*/}" "\$out"
+STUB
+  chmod +x "$STUB/curl"
+}
+
+@test "rtk script installs the locked full-edition asset after checking checksums.txt" {
+  [ "$(uname -m)" = x86_64 ] || skip "fixture is the x86_64 musl asset"
+  f="$(render run_onchange_after_35-rtk.sh.tmpl)"
+  grep -q 'RTK_VERSION="1.1.0"' "$f"
+  run sh -c 'grep -v "^ *#" "$1" | grep -E "rtk-oss|rtk-proxy|telemetry"' _ "$f"; [ "$status" -ne 0 ]
+  rtk_release "$SB/rel"
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$("$H/.local/bin/rtk" --version)" = "rtk 1.1.0" ]
+  grep -qx 'https://github.com/rtk-ai/rtk/releases/download/v1.1.0/rtk-x86_64-unknown-linux-musl.tar.gz' "$SB/rel/urls"
+  [ ! -e "$H/.local/state/develop-env/retry/35-rtk" ]
+  # installed at the locked version: no download on the next run
+  : > "$SB/rel/urls"
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$f"
+  [ "$status" -eq 0 ] && [ ! -s "$SB/rel/urls" ]
+}
+
+@test "rtk script refuses an asset whose sha256 does not match and leaves a retry marker" {
+  [ "$(uname -m)" = x86_64 ] || skip "fixture is the x86_64 musl asset"
+  f="$(render run_onchange_after_35-rtk.sh.tmpl)"
+  rtk_release "$SB/rel" bad
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warning:"*"does not match checksums.txt"* ]]
+  [ ! -e "$H/.local/bin/rtk" ]
+  [ -s "$H/.local/state/develop-env/retry/35-rtk" ]
+}
+
+@test "ccusage script installs the locked npm package and links it into ~/.local/bin" {
+  f="$(render run_onchange_after_26-ccusage.sh.tmpl)"
+  grep -q 'CC_VERSION="20.0.48"' "$f"
+  p="$SB/npm-prefix"; mkdir -p "$p/bin"
+  cat > "$STUB/npm" <<STUB
+#!/bin/sh
+case "\$1" in
+  prefix) echo "$p" ;;
+  install) echo "\$*" >> "$SB/npm.log"
+           printf '#!/bin/sh\necho "ccusage 20.0.48"\n' > "$p/bin/ccusage"; chmod +x "$p/bin/ccusage" ;;
+esac
+STUB
+  chmod +x "$STUB/npm"
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qx 'install -g ccusage@20.0.48' "$SB/npm.log"
+  [ "$(readlink "$H/.local/bin/ccusage")" = "$p/bin/ccusage" ]
+  [ ! -e "$H/.local/state/develop-env/retry/26-ccusage" ]
+  run env -i HOME="$H" PATH="$STUB:/usr/bin:/bin" sh "$f"   # installed: npm install not run again
+  [ "$status" -eq 0 ] && [ "$(wc -l < "$SB/npm.log")" -eq 1 ]
+}
+
 @test "cleanup lists old tools, keeps them on N, removes them with --yes" {
   mkdir -p "$H/.nvm" "$H/.local/fish-env/bin" "$H/.local/node-v20.1.0-linux-x64/bin" \
            "$H/.local/bin" "$H/micromamba/envs/fish-env" "$H/micromamba/envs/cli-tools/bin"
@@ -224,6 +298,36 @@ EOF
   for c in micromamba_envs cli_tools_linked node_default uv_tools; do
     [[ "$output" == *"$c"* ]]
   done
+}
+
+@test "doctor rtk: locked version and Claude hook PASS; wrong version FAILs; no hook or no ccusage WARNs" {
+  v="$(sed -n 's/^  rtk: *//p' "$REPO_ROOT/home/.chezmoidata/versions.yaml")"
+  [ -n "$v" ]
+  # rtk_stub VERSION HOOK_LINE
+  rtk_stub() { stub rtk "case \"\$1\" in --version) echo 'rtk $1' ;; init) echo 'rtk Configuration:'; echo; echo '$2' ;; esac"; }
+  rtk_stub "$v" '[ok] Hook: rtk hook claude (native binary command)'
+  stub ccusage 'echo "ccusage 20.0.48"'
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"PASS rtk"* ]] && [[ "$output" == *"PASS ccusage"* ]]
+  rtk_stub "$v" '[--] Hook: not found'
+  rm "$STUB/ccusage"
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARN rtk: rtk init --show reports no Claude hook"* ]]
+  [[ "$output" == *"WARN ccusage: ccusage not on PATH: run chezmoi state delete-bucket"* ]]
+  rtk_stub 0.0.1 '[ok] Hook: rtk hook claude'
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL rtk: rtk is rtk 0.0.1, the Version lock wants $v"* ]]
+  rm "$STUB/rtk"; mkdir -p "$H/.local/state/develop-env/retry"; echo 1 > "$H/.local/state/develop-env/retry/35-rtk"
+  run env HOME="$H" PATH="$STUB:/usr/bin:/bin" DOCTOR_ONLY='62-*' "$REPO_ROOT/bin/doctor" --ci
+  echo "$output"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"FAIL rtk: rtk not on PATH: run $REPO_ROOT/bin/update"* ]]   # a retry is pending: update is enough
 }
 
 @test "cleanup: plain files matching the globs are targets, live env links survive" {

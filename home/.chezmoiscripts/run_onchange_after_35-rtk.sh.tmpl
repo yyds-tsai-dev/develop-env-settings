@@ -1,0 +1,61 @@
+{{- /* Every role off Windows (Linux Server, macOS Desktop and Desktop + Server);
+Windows runs the PowerShell twin, run_onchange_after_35-rtk.ps1. */ -}}
+{{- if ne .chezmoi.os "windows" -}}
+#!/bin/sh
+# Installs rtk {{ index .versions "rtk" }} (the full edition from github.com/rtk-ai/rtk, never
+# rtk-oss or the rtk-proxy binaries) into ~/.local/bin. The release asset is
+# checked against the release's checksums.txt before it is installed. Linux
+# x86_64 gets the static musl build (it runs on glibc 2.28). Runs before
+# 50-claude and 55-codex, so the Claude and Codex `rtk hook` commands find it
+# (a plain Desktop's Codex merge keeps a hook only when its command exists).
+# Telemetry is left at its default (off until `rtk telemetry enable`).
+# Warns and exits 0 on any failure; never aborts apply. A failure leaves a retry
+# marker with a fresh nonce, so the next apply (bin/update) reruns this script
+# after every failure; success removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "35-rtk") }}
+PATH="$HOME/.local/bin:$PATH"
+export PATH
+RTK_VERSION="{{ index .versions "rtk" }}"
+RTK="$HOME/.local/bin/rtk"
+
+warn() { echo "warning: $*" >&2; }
+{{ template "retry-sh" "35-rtk" }}
+retry() { warn "$*"; retry_mark; exit 0; }
+
+[ -n "$RTK_VERSION" ] || retry "no rtk version locked (run bin/update)"
+if [ "$("$RTK" --version 2>/dev/null)" = "rtk $RTK_VERSION" ]; then retry_clear; exit 0; fi
+
+case "$(uname -s)-$(uname -m)" in
+    Linux-x86_64) ASSET=rtk-x86_64-unknown-linux-musl.tar.gz ;;
+    Linux-aarch64|Linux-arm64) ASSET=rtk-aarch64-unknown-linux-gnu.tar.gz ;;
+    Darwin-x86_64) ASSET=rtk-x86_64-apple-darwin.tar.gz ;;
+    Darwin-arm64|Darwin-aarch64) ASSET=rtk-aarch64-apple-darwin.tar.gz ;;
+    *) warn "no rtk release for $(uname -s)-$(uname -m); skipping rtk"; retry_clear; exit 0 ;;
+esac
+
+# sha256 FILE: the file's hex digest (sha256sum on Linux, shasum on macOS).
+sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"
+    else shasum -a 256 "$1"; fi 2>/dev/null | sed 's/ .*//'
+}
+
+base="https://github.com/rtk-ai/rtk/releases/download/v$RTK_VERSION"
+tmp="$(mktemp -d)" || retry "mktemp failed; skipping rtk"
+trap 'rm -rf "$tmp"' EXIT
+curl -fsSL --retry 3 -o "$tmp/checksums.txt" "$base/checksums.txt" \
+    || retry "could not download the rtk $RTK_VERSION checksums (bin/update retries)"
+curl -fsSL --retry 3 -o "$tmp/$ASSET" "$base/$ASSET" \
+    || retry "could not download rtk $RTK_VERSION ($ASSET) (bin/update retries)"
+want="$(awk -v a="$ASSET" '$2 == a || $2 == "*" a { print $1; exit }' "$tmp/checksums.txt")"
+have="$(sha256 "$tmp/$ASSET")"
+[ -n "$want" ] && [ "$want" = "$have" ] \
+    || retry "rtk $RTK_VERSION $ASSET: sha256 ${have:-?} does not match checksums.txt (${want:-no entry}); not installed"
+mkdir -p "$tmp/x" && tar -xzf "$tmp/$ASSET" -C "$tmp/x" && [ -f "$tmp/x/rtk" ] \
+    || retry "could not extract rtk from $ASSET (bin/update retries)"
+mkdir -p "$HOME/.local/bin" && chmod 0755 "$tmp/x/rtk" && mv -f "$tmp/x/rtk" "$RTK" \
+    || retry "could not install $RTK (bin/update retries)"
+[ "$("$RTK" --version 2>/dev/null)" = "rtk $RTK_VERSION" ] \
+    || retry "$RTK --version does not report rtk $RTK_VERSION"
+retry_clear
+exit 0
+{{- end }}

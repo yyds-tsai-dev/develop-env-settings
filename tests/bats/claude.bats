@@ -122,11 +122,13 @@ blank() { [ -z "$(tr -d '[:space:]' <<<"$1")" ]; }
 @test "plain desktop gets Claude Code and Codex: scripts render per OS, ~/.claude and ~/.codex managed" {
   init_plain_desktop
   # macOS: the sh scripts; Windows: the ps1 twins
-  for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl; do
+  for s in "$SCRIPT" run_onchange_after_55-codex.sh.tmpl run_onchange_after_60-statusline.sh.tmpl \
+           run_onchange_after_35-rtk.sh.tmpl run_onchange_after_26-ccusage.sh.tmpl; do
     out="$(render_os darwin "$s")"; ! blank "$out" || { echo "$s empty on a macOS desktop"; false; }
     out="$(render_os windows "$s")"; blank "$out" || { echo "$s renders on windows"; false; }
   done
-  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_55-codex.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl; do
+  for s in run_onchange_after_50-claude.ps1.tmpl run_onchange_after_55-codex.ps1.tmpl run_onchange_after_60-statusline.ps1.tmpl \
+           run_onchange_after_35-rtk.ps1.tmpl run_onchange_after_26-ccusage.ps1.tmpl; do
     out="$(render_os windows "$s")"; ! blank "$out" || { echo "$s empty on a windows desktop"; false; }
     out="$(render_os darwin "$s")"; blank "$out" || { echo "$s renders on macOS"; false; }
   done
@@ -363,6 +365,45 @@ PS
     [ "$status" -eq 0 ]
   else
     echo "pwsh not installed: syntax parse skipped" >&2
+  fi
+}
+
+@test "rtk: settings.json adds the Bash hook and keeps every other hook; CLAUDE.md ends with @RTK.md" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  run render_home server
+  [ "$status" -eq 0 ]
+  dest="${lines[${#lines[@]}-1]}"
+  f="$dest/.claude/settings.json"
+  py="$(command -v python3 || command -v python)"
+  run "$py" - "$f" <<'PY'
+import json, sys
+hooks = json.load(open(sys.argv[1]))["hooks"]
+got = sorted((ev, g["matcher"], h["command"].split("/")[-1].strip('"'))
+             for ev, groups in hooks.items() for g in groups for h in g["hooks"])
+want = sorted([
+    ("PreToolUse", "Grep|Glob", "cbm-code-discovery-gate"),
+    ("PreToolUse", "Bash", "rtk hook claude"),
+    ("PostToolUse", "Read", "cbm-code-discovery-gate"),
+    ("SubagentStart", "*", "cbm-subagent-reminder"),
+] + [("SessionStart", m, "cbm-session-reminder") for m in ("startup", "resume", "clear", "compact")])
+assert got == want, got
+rtk = [g for g in hooks["PreToolUse"] if g["matcher"] == "Bash"]
+assert rtk == [{"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]}], rtk
+PY
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(tail -n 1 "$dest/.claude/CLAUDE.md")" = '@RTK.md' ]
+  r="$dest/.claude/RTK.md"
+  [ "$(head -n 1 "$r")" = '# Command output' ]
+  grep -qF 'Re-run a' "$r" && grep -qF 'command as `rtk bypass <cmd>` only when its result is unusable' "$r"
+  [ "$(wc -l < "$r")" -eq 8 ]
+  # rtk itself agrees, when this host has it (read-only: --show only reports)
+  if command -v rtk >/dev/null 2>&1; then
+    run env HOME="$dest" rtk init --show
+    echo "$output"
+    printf '%s\n' "$output" | grep -q '^\[ok\] Hook: rtk hook claude'
+    printf '%s\n' "$output" | grep -q '^\[ok\] Global (~/.claude/CLAUDE.md): @RTK.md reference'
+    printf '%s\n' "$output" | grep -q '^\[ok\] settings.json: RTK hooks configured'
   fi
 }
 

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://ccusage.com/config-schema.json",
+  "defaults": {
+    "timezone": "Asia/Taipei"
+  }
+}

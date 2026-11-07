@@ -23,7 +23,7 @@ Bootstrap installs chezmoi and uv into `~/.local/bin`, resolves the Version lock
 | Role | OS | Gets |
 |---|---|---|
 | `server` | Linux x86_64 | Full environment under userland paths |
-| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, Claude Code and Codex (same user files, plugins, skills, bundles and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists, and Codex bundle skills are directory junctions) |
+| `desktop` | Windows, macOS | VS Code client pieces, WezTerm, git, gh, SSH client and key, Nerd Font, Bitwarden CLI, rtk, ccusage (Windows: only with a Node install), Claude Code and Codex (same user files, plugins, skills, bundles and status line as a Server; MCP servers whose runtime is missing are skipped with a warning; on Windows drawio runs through `cmd /c npx` when Node exists, and Codex bundle skills are directory junctions) |
 | `desktop+server` | macOS | Both, Server tools through Homebrew; zsh (`~/.zshrc` block) starts fish |
 
 A Windows Server use goes through WSL2 with role `server`.
@@ -48,7 +48,7 @@ Done when `bin/doctor` reports no FAIL (WARN allowed), for example Claude or Cod
 - On a machine with a working environment, review `chezmoi diff` before the first apply.
 - Agents must not run Bootstrap on a home that has a hold file, or on a shared home in use, without your go-ahead (see [AGENTS.md](AGENTS.md)).
 
-Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare commands); `~/.local/bin/node` is re-pointed to fnm's default Node 24; the codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades.
+Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare commands); `~/.local/bin/node` is re-pointed to fnm's default Node 24; the codebase-memory-mcp installer stops running `codebase-memory-mcp` processes when it upgrades. Codex asks once to trust the new rtk hook; remove a `~/.codex/hooks.json` left by a manual `rtk init -g --codex`, or Codex warns about two hook sources. A machine-local `[[hooks.PreToolUse]]` in `config.toml` is replaced by the managed one.
 
 ## Daily use
 
@@ -58,6 +58,8 @@ Migration notes: Codex asks once to re-trust the codebase-memory hooks (now bare
 | Pull machine changes back | `bin/capture` (prints `git diff --stat`; never commits, review and commit yourself) |
 | Check the machine | `bin/doctor` (`--ci` skips login and Secret checks) |
 | Remove old tools apply left behind | `bin/cleanup` |
+| Token savings from rtk (Claude Code and Codex shell output is compressed by its hook) | `rtk gain` |
+| Claude Code and Codex usage and cost from local logs (Asia/Taipei days) | `ccusage daily` |
 | Roll back versions | `cd "$(chezmoi source-path)/.." && git checkout <rev> -- home/.chezmoidata/versions.yaml && chezmoi apply` |
 
 `bin/capture` runs `chezmoi re-add`, rewrites `desktop/vscode/server-extensions.txt` from `~/.vscode-server/extensions`, and updates the membership of `claude.plugins`, `claude.marketplaces`, `uv_tools`, `cli_tools` and `pdftools` in `home/.chezmoidata/manifest.yaml`. It also compares the manifest `mcp` entries with the user-scope Claude MCP servers (names and commands only, from `~/.claude.json` `mcpServers` or `claude mcp list`) and prints the differences without rewriting them, since their args are templated. It never changes the Version lock.

@@ -1,0 +1,54 @@
+{{- /* Windows (the Desktop role; Server use goes through WSL2): the twin of
+run_onchange_after_35-rtk.sh. */ -}}
+{{- if eq .chezmoi.os "windows" -}}
+# Installs rtk {{ index .versions "rtk" }} (the full edition, never rtk-oss or rtk-proxy) from the
+# release zip into ~/.local/bin (no admin), after checking it against the
+# release's checksums.txt. Runs before 50-claude and 55-codex, whose
+# `rtk hook` commands need it. Telemetry stays at its default (off).
+# Never aborts apply. A failure leaves a retry marker with a fresh nonce, so
+# the next apply reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "35-rtk") }}
+$ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "35-rtk" }}
+$version = '{{ index .versions "rtk" }}'
+$asset = 'rtk-x86_64-pc-windows-msvc.zip'
+$bin = Join-Path $HOME '.local/bin'
+$exe = Join-Path $bin 'rtk.exe'
+$tmp = $null
+try {
+    # Ensure the bin dir is on the user PATH (idempotent), as 25-bw does.
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if ((($userPath -split ';') | Where-Object { $_ -eq $bin }).Count -eq 0) {
+        [Environment]::SetEnvironmentVariable('Path', ((@($userPath, $bin) | Where-Object { $_ }) -join ';'), 'User')
+    }
+    if (-not $version) { throw 'no rtk version locked' }
+    if ((Test-Path $exe) -and ((& $exe --version 2>$null) -eq "rtk $version")) { Clear-RetryMarker; exit 0 }
+    New-Item -ItemType Directory -Force -Path $bin | Out-Null
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("rtk-" + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $base = "https://github.com/rtk-ai/rtk/releases/download/v$version"
+    $sums = Join-Path $tmp 'checksums.txt'
+    $zip = Join-Path $tmp $asset
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/checksums.txt" -OutFile $sums
+    Invoke-WebRequest -UseBasicParsing -Uri "$base/$asset" -OutFile $zip
+    $want = ''
+    foreach ($l in Get-Content -LiteralPath $sums) {
+        $f = $l -split '\s+'
+        if ($f.Count -ge 2 -and ($f[1] -eq $asset -or $f[1] -eq "*$asset")) { $want = $f[0]; break }
+    }
+    $have = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash
+    if (-not $want -or $want -ne $have.ToLowerInvariant()) {
+        throw "$asset sha256 $have does not match checksums.txt ($want); not installed"
+    }
+    Expand-Archive -Path $zip -DestinationPath (Join-Path $tmp 'x') -Force
+    Move-Item -Force (Join-Path $tmp 'x/rtk.exe') $exe
+    if ((& $exe --version 2>$null) -ne "rtk $version") { throw "$exe --version does not report rtk $version" }
+    Clear-RetryMarker
+} catch {
+    Write-Warning "could not install rtk ${version} (re-running the bootstrap one-liner retries): $_"
+    Set-RetryMarker
+} finally {
+    if ($tmp) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp }
+}
+exit 0
+{{- end }}

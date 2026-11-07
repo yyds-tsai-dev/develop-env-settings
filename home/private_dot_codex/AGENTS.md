@@ -53,3 +53,12 @@ ALWAYS prefer MCP graph tools over grep/glob/file-search for code discovery.
 - Verify saved results after completion; preserve newer stop/pause instructions and the active task scope. CLI queue support alone does not prove wake-up. If unavailable, disclose the specific limitation once and leave a durable resumable handoff.
 - Delegate only when the user or applicable instructions request it, for a concrete independent task. Use bounded ownership and acceptance checks; review completed checkpoints and batch corrections.
 <!-- codex-efficient-waiting:end -->
+
+# Command output
+
+Command output here is condensed to save tokens, keeping every signal and
+dropping costly noise. Treat it as the complete result: run commands
+normally, and batch related commands into one call to avoid extra turns.
+Truncated results state their recovery path in their own output. Re-run a
+command as `rtk bypass <cmd>` only when its result is unusable: empty when
+output was clearly expected, contradicting its exit code, or garbled.

@@ -170,15 +170,17 @@ def test_main_exits_nonzero_when_check_fails(tmp_path, monkeypatch, capsys):
 
 def test_one_pass_fixpoint_for_hook_tables():
     for src in ('[hooks.state."/x/config.toml:session_start:0:0"]\ntrusted_hash = "sha256:00"\n',
-                '[[hooks.PreToolUse]]\nmatcher = "*"\n\n[[hooks.PreToolUse.hooks]]\n'
+                # PostToolUse: an event the fragment does not manage (PreToolUse is rtk's now)
+                '[[hooks.PostToolUse]]\nmatcher = "*"\n\n[[hooks.PostToolUse.hooks]]\n'
                 'type = "command"\ncommand = "x"\n',
                 LIVE):
         once = mcc.merge(src, MANAGED)
         assert mcc.merge(once, MANAGED) == once
         assert "\n\n\n" not in once
         got = load(once)
-        if "PreToolUse" in src:
-            assert got["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "x"
+        if "PostToolUse" in src:
+            assert got["hooks"]["PostToolUse"][0]["hooks"][0]["command"] == "x"
+            assert _hook_cmds(got, "PreToolUse") == ["rtk hook codex"]
 
 
 # --desktop, --fragment-b64, --current-file, --keep-on-error
@@ -273,3 +275,37 @@ def test_desktop_windows_non_exe_runs_through_cmd():
     out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=True))
     assert out["mcp_servers"]["drawio"]["command"] == "cmd"
     assert out["mcp_servers"]["semble"]["command"] == "uvx"
+
+
+def _hook_cmds(doc, ev):
+    return [h["command"] for g in doc.get("hooks", {}).get(ev, []) for h in g["hooks"]]
+
+
+def test_rtk_pretooluse_hook_added_once_and_other_hooks_kept():
+    once = mcc.merge(LIVE, MANAGED)
+    out = load(once)
+    assert out["hooks"]["PreToolUse"] == [
+        {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook codex"}]}]
+    assert _hook_cmds(out, "SessionStart") == ["codebase-memory-mcp hook-augment"]
+    assert _hook_cmds(out, "SubagentStart") == ["codebase-memory-mcp hook-augment"]
+    assert out["hooks"]["state"] == load(LIVE)["hooks"]["state"]
+    # merging twice yields one rtk entry and the same file
+    twice = mcc.merge(once, MANAGED)
+    assert twice == once
+    assert _hook_cmds(load(twice), "PreToolUse") == ["rtk hook codex"]
+    # an existing PreToolUse array (e.g. a hand-added rtk entry) is replaced, not appended to
+    prior = ('[[hooks.PreToolUse]]\nmatcher = "Bash"\n\n[[hooks.PreToolUse.hooks]]\n'
+             'type = "command"\ncommand = "rtk hook codex"\n')
+    assert _hook_cmds(load(mcc.merge(prior, MANAGED)), "PreToolUse") == ["rtk hook codex"]
+
+
+def test_desktop_keeps_rtk_hook_only_when_rtk_is_on_path(capsys):
+    have = {"uvx": "/x/uvx", "codebase-memory-mcp": "/x/cbm"}
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert "PreToolUse" not in out["hooks"]
+    assert "skipping Codex hook PreToolUse: rtk hook codex" in capsys.readouterr().err
+    have["rtk"] = "/x/rtk"
+    out = load(mcc.desktop_servers(MANAGED, which=have.get, windows=False))
+    assert _hook_cmds(out, "PreToolUse") == ["rtk hook codex"]
+    out = load(mcc.desktop_servers(MANAGED, which={**have, "rtk": r"C:\u\rtk.exe"}.get, windows=True))
+    assert _hook_cmds(out, "PreToolUse") == ["rtk hook codex"]

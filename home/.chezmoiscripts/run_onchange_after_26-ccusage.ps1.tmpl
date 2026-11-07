@@ -1,0 +1,29 @@
+{{- if eq .chezmoi.os "windows" -}}
+# Installs ccusage {{ index .versions "ccusage" }} (Claude Code / Codex usage reports, e.g.
+# `ccusage daily`) with `npm install -g` when a Node install's npm is on PATH
+# (Bootstrap installs no Node on Windows). Without npm it prints one warning
+# and is not a failure (Doctor warns that ccusage is missing). Its defaults
+# (Asia/Taipei timezone) live in the managed ~/.config/claude/ccusage.json.
+# Never aborts apply. A failed install leaves a retry marker with a fresh
+# nonce, so the next apply reruns this after every failure; a clean run removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "26-ccusage") }}
+$ErrorActionPreference = 'Continue'
+{{ template "retry-ps1" "26-ccusage" }}
+$version = '{{ index .versions "ccusage" }}'
+try {
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) {
+        Write-Warning 'npm not found (no Node install); skipping ccusage'
+        Clear-RetryMarker
+        exit 0
+    }
+    $have = if (Get-Command ccusage -ErrorAction SilentlyContinue) { (& ccusage --version 2>$null) -join '' } else { '' }
+    if ($have -eq "ccusage $version") { Clear-RetryMarker; exit 0 }
+    & npm install -g "ccusage@$version"
+    if ($LASTEXITCODE -ne 0) { throw "npm install -g ccusage@$version exited $LASTEXITCODE" }
+    Clear-RetryMarker
+} catch {
+    Write-Warning "could not install ccusage ${version} (re-running the bootstrap one-liner retries): $_"
+    Set-RetryMarker
+}
+exit 0
+{{- end }}

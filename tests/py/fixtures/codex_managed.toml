@@ -27,6 +27,13 @@ tool_timeout_sec = 120
 url = "https://developers.openai.com/mcp"
 tool_timeout_sec = 60
 
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "rtk hook codex"
+
 [[hooks.SessionStart]]
 matcher = "startup|resume|clear|compact"
 
