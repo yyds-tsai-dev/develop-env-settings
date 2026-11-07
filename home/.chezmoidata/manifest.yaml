@@ -82,6 +82,72 @@ claude:
     - { name: skill-paper-search, source: none, dir: paper-search, version_from: paper-search-mcp, codex: true, url: "https://raw.githubusercontent.com/openags/paper-search-mcp/{ref}/claude-code/SKILL.md" }
     - { name: skill-graphify, source: none, dir: graphify, installer: graphify }   # `graphify install` (graphifyy uv tool)
     - { name: skill-codebase-memory, source: none, dir: codebase-memory, installer: codebase-memory-mcp }
+  # Claude skill bundles: the repo tarball at `ref` ({version} is the lock value).
+  # Only the allowlisted `skills` (whole <skills_dir>/<name>/ dirs) are copied into
+  # ~/.claude/skills/<name>/ and the allowlisted `agents` (<agents_dir>/<name>.md)
+  # into ~/.claude/agents/; nothing else from the repo (hooks, commands, rules,
+  # setup scripts) is used. 50-claude records what it installed in
+  # ~/.local/state/develop-env/claude-bundles/<name> and removes only those
+  # recorded entries when they leave the allowlist. The repo's own agents
+  # (home/dot_claude/agents) are never written.
+  skill_bundles:
+    # Claude Scholar, pinned (source none): bin/update keeps the committed lock; bump it
+    # by editing versions.yaml. Left out on purpose (over-broad triggers): agents
+    # code-reviewer, tdd-guide; skills planning-with-files, daily-coding, bug-detective,
+    # git-workflow, verification-loop.
+    - name: claude-bundle-claude-scholar
+      source: none
+      bundle: claude-scholar
+      repo: Galaxy-Dawn/claude-scholar
+      ref: "{version}"
+      skills_dir: skills
+      agents_dir: agents
+      skills:
+        - agent-identifier
+        - architecture-design
+        - citation-verification
+        - code-review-excellence
+        - command-development
+        - daily-paper-generator
+        - defuddle
+        - doc-coauthoring
+        - expression-skill
+        - frontend-design
+        - hook-development
+        - kaggle-learner
+        - latex-conference-template-organizer
+        - mcp-integration
+        - ml-paper-writing
+        - nature-data
+        - nature-polishing
+        - nature-response
+        - nature-writing
+        - obsidian-kb-artifacts
+        - obsidian-literature-workflow
+        - obsidian-project-kb-core
+        - obsidian-source-ingestion
+        - paper-self-review
+        - plugin-structure
+        - post-acceptance
+        - publication-chart-skill
+        - research-ideation
+        - results-analysis
+        - results-report
+        - review-response
+        - skill-development
+        - skill-improver
+        - skill-quality-reviewer
+        - ui-ux-pro-max
+        - uv-package-manager
+        - webapp-testing
+        - web-design-reviewer
+        - writing-anti-ai
+        - zotero-obsidian-bridge
+      agents:
+        - kaggle-miner
+        - literature-reviewer
+        - paper-miner
+        - rebuttal-writer
 codex:
   # Codex skill bundles: the repo tarball at `ref` ({version} is the lock value) is
   # unpacked into ~/.codex/skill-bundles/<bundle>-<version>/ and each skill is a

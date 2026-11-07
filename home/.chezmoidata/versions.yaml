@@ -4,6 +4,7 @@ versions:
   bw: 2026.10.0
   ccusage: 20.0.48
   chezmoi: 2.73.2
+  claude-bundle-claude-scholar: d394fb599ed9
   codebase-memory-mcp: 0.12.1
   codex: 0.163.0
   codex-bundle-academic-research-skills: 3.23.1

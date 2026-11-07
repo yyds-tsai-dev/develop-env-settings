@@ -24,6 +24,7 @@ of run_onchange_after_50-claude.sh. */ -}}
 {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
 # Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
 # Codex bundle locks (a changed one re-runs this script so installed plugins are updated):{{ range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
+# Claude skill bundle locks:{{ range (index .claude "skill_bundles" | default list) }} {{ .name }}={{ index $.versions .name | default "" }}{{ end }}
 $ErrorActionPreference = 'Continue'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
@@ -145,6 +146,106 @@ if (Test-Cmd 'graphify') {
 } else {
     Skip-Step 'graphify not installed on this desktop; skipping the graphify skill'
 }
+{{- end }}
+{{- end }}
+
+# --- Claude skill bundles (allowlisted skills and agents from a repo tarball) ---
+# Install-ClaudeBundle: as cbundle in the sh twin. Copies each allowlisted
+# SkillsDir\<skill>\ to ~/.claude/skills/<skill>/ and AgentsDir\<agent>.md to
+# ~/.claude/agents/, records them in ~/.local/state/develop-env/claude-bundles/<Name>
+# ("version V", "skill N", "agent N"), removes only recorded entries that left
+# the allowlist, moves an unrecorded differing target to ~/.claude/.devenv-replaced\
+# first, and never writes the repo's own agents. Nothing is fetched when the
+# record already matches.
+{{- $own := list }}
+{{- range glob (joinPath .chezmoi.sourceDir "dot_claude/agents/*") }}{{ $own = append $own (base . | trimSuffix ".tmpl" | trimSuffix ".md") }}{{ end }}
+$ownAgents = @({{ range $i, $a := $own }}{{ if $i }}, {{ end }}{{ $a | squote }}{{ end }})
+$cbState = Join-Path $HOME '.local\state\develop-env\claude-bundles'
+$cbTar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path $cbTar)) { $cbTar = 'tar' }
+# Test-SameTree A B: the two files, or the two dirs' file sets and contents, are identical.
+function Test-SameTree([string]$A, [string]$B) {
+    if (-not (Test-Path -LiteralPath $B)) { return $false }
+    if (-not (Test-Path -LiteralPath $A -PathType Container)) {
+        return (Test-Path -LiteralPath $B -PathType Leaf) -and (Get-FileHash -LiteralPath $A).Hash -eq (Get-FileHash -LiteralPath $B).Hash
+    }
+    $ha = @(Get-ChildItem -LiteralPath $A -Recurse -File | ForEach-Object { $_.FullName.Substring($A.Length) + ' ' + (Get-FileHash -LiteralPath $_.FullName).Hash } | Sort-Object)
+    $hb = @(Get-ChildItem -LiteralPath $B -Recurse -File | ForEach-Object { $_.FullName.Substring($B.Length) + ' ' + (Get-FileHash -LiteralPath $_.FullName).Hash } | Sort-Object)
+    return (($ha -join "`n") -eq ($hb -join "`n"))
+}
+function Install-ClaudeBundleEntry([string]$Src, [string]$Dst, [string]$Entry, [string[]]$Old) {
+    if (Test-Path -LiteralPath $Dst) {
+        if (Test-SameTree $Src $Dst) { return $true }
+        if ($Old -notcontains $Entry) {
+            $aside = Join-Path $HOME '.claude\.devenv-replaced'
+            try {
+                New-Item -ItemType Directory -Force -Path $aside | Out-Null
+                Move-Item -LiteralPath $Dst (Join-Path $aside ((Split-Path -Leaf $Dst) + '.' + (Get-Date -Format 'yyyyMMddHHmmss')))
+            } catch { Warn-Step "cannot move $Dst aside: $_"; return $false }
+        }
+    }
+    try {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $Dst
+        Copy-Item -Recurse -Force -LiteralPath $Src -Destination $Dst -ErrorAction Stop
+        return $true
+    } catch { Warn-Step "cannot install ${Dst}: $_"; return $false }
+}
+function Install-ClaudeBundle([string]$Name, [string]$Repo, [string]$Ref, [string]$Version,
+                              [string]$SkillsDir, [string]$AgentsDir, [string[]]$Skills, [string[]]$Agents) {
+    $st = Join-Path $cbState $Name
+    $old = @()
+    if (Test-Path $st) { $old = @(Get-Content $st) }
+    $want = @("version $Version") + @($Skills | ForEach-Object { "skill $_" }) + @($Agents | ForEach-Object { "agent $_" })
+    $sk = Join-Path $HOME '.claude\skills'; $ag = Join-Path $HOME '.claude\agents'
+    if (($old -join "`n") -eq ($want -join "`n")) {
+        $ok = $true
+        foreach ($x in $Skills) { if (-not (Test-Path (Join-Path $sk "$x\SKILL.md"))) { $ok = $false } }
+        foreach ($x in $Agents) { if (-not (Test-Path (Join-Path $ag "$x.md"))) { $ok = $false } }
+        if ($ok) { return }
+    }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('devenv-cb-' + [guid]::NewGuid())
+    $tgz = "$tmp.tgz"
+    try {
+        New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+        Invoke-WebRequest -UseBasicParsing -TimeoutSec 300 -Uri "https://codeload.github.com/$Repo/tar.gz/$Ref" -OutFile $tgz
+        & $cbTar -xzf $tgz -C $tmp --strip-components=1
+        if ($LASTEXITCODE -ne 0) { throw "tar exit $LASTEXITCODE" }
+    } catch {
+        Warn-Step "could not fetch $Repo at ${Ref}: $_"
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp, $tgz
+        return
+    }
+    New-Item -ItemType Directory -Force -Path $sk, $ag | Out-Null
+    $new = @("version $Version")
+    foreach ($x in $Skills) {
+        $src = Join-Path $tmp "$SkillsDir\$x"
+        if (-not (Test-Path (Join-Path $src 'SKILL.md'))) { Warn-Step "bundle $Name has no skill $SkillsDir/$x"; continue }
+        if (Install-ClaudeBundleEntry $src (Join-Path $sk $x) "skill $x" $old) { $new += "skill $x" }
+    }
+    foreach ($x in $Agents) {
+        if ($ownAgents -contains $x) { Warn-Step "bundle ${Name}: agent $x is one of this repo's own agents; not installed"; continue }
+        $src = Join-Path $tmp "$AgentsDir\$x.md"
+        if (-not (Test-Path $src)) { Warn-Step "bundle $Name has no agent $AgentsDir/$x.md"; continue }
+        if (Install-ClaudeBundleEntry $src (Join-Path $ag "$x.md") "agent $x" $old) { $new += "agent $x" }
+    }
+    # recorded entries that left the allowlist (and only those) are removed
+    foreach ($l in $old) {
+        $k, $x = $l -split ' ', 2
+        if ($k -eq 'skill' -and $Skills -notcontains $x) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath (Join-Path $sk $x) }
+        if ($k -eq 'agent' -and $Agents -notcontains $x -and $ownAgents -notcontains $x) { Remove-Item -Force -ErrorAction SilentlyContinue -LiteralPath (Join-Path $ag "$x.md") }
+    }
+    try {
+        New-Item -ItemType Directory -Force -Path $cbState | Out-Null
+        [IO.File]::WriteAllText($st, (($new -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
+    } catch { Warn-Step "cannot write ${st}: $_" }
+    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp, $tgz
+}
+{{- range (index .claude "skill_bundles" | default list) }}
+{{- $v := index $.versions .name | default "" }}
+{{- if and (contains "{version}" .ref) (not $v) }}
+Warn-Step {{ printf "%s: no locked version; skipped (re-run the bootstrap one-liner)" .name | squote }}
+{{- else }}
+Install-ClaudeBundle {{ .name | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ $v | squote }} {{ .skills_dir | squote }} {{ .agents_dir | squote }} @({{ range $i, $x := (index . "skills" | default list) }}{{ if $i }}, {{ end }}{{ $x | squote }}{{ end }}) @({{ range $i, $x := (index . "agents" | default list) }}{{ if $i }}, {{ end }}{{ $x | squote }}{{ end }})
 {{- end }}
 {{- end }}
 

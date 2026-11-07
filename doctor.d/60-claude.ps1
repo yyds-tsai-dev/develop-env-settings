@@ -111,6 +111,48 @@ function check_claude_skills {
 }
 Register 'check_claude_skills'
 
+# Get-ClaudeBundleLists: "<bundle> skill <name>" / "<bundle> agent <name>" for
+# every allowlisted entry of the manifest's claude.skill_bundles.
+function Get-ClaudeBundleLists {
+    $c = $false; $b = $false; $n = ''; $k = ''
+    foreach ($l in Get-ClaudeManifestLines) {
+        if ($l -match '^[a-z_]+:') { $c = ($l -match '^claude:'); continue }
+        if (-not $c) { continue }
+        if ($l -match '^  [a-z_]+:') { $b = ($l -match '^  skill_bundles:'); continue }
+        if (-not $b) { continue }
+        if ($l -match '^    - name: *(\S+)') { $n = $Matches[1]; $k = ''; continue }
+        if ($l -match '^      ([a-z_]+):') { $k = $Matches[1]; continue }
+        if ($l -match '^        - (\S+)' -and $k -in @('skills', 'agents')) { "$n $($k.Substring(0, 5)) $($Matches[1])" }
+    }
+}
+
+# WARN (never FAIL): a Claude skill bundle (Claude Scholar) is not installed at
+# its locked version, or an allowlisted skill or agent is missing.
+function check_claude_bundles {
+    $lock = Get-Content -LiteralPath (Join-Path $script:DoctorRoot 'home/.chezmoidata/versions.yaml')
+    $lists = @(Get-ClaudeBundleLists)
+    $stale = @(); $missing = @()
+    foreach ($n in @($lists | ForEach-Object { ($_ -split ' ')[0] } | Sort-Object -Unique)) {
+        $want = ''
+        foreach ($l in $lock) { if ($l -match "^  $([regex]::Escape($n)): *'?([^']*)'?$") { $want = $Matches[1] } }
+        $st = Join-Path $HOME ".local/state/develop-env/claude-bundles/$n"
+        $have = ''
+        if (Test-Path $st) { foreach ($l in Get-Content $st) { if ($l -match '^version (.*)$') { $have = $Matches[1] } } }
+        if ($have -ne $want) { $stale += "$n(installed $have, lock $want)" }
+    }
+    foreach ($e in $lists) {
+        $n, $k, $x = $e -split ' ', 3
+        if ($k -eq 'skill' -and -not (Test-Path (Join-Path $HOME ".claude/skills/$x/SKILL.md"))) { $missing += "skill:$x" }
+        if ($k -eq 'agent' -and -not (Test-Path (Join-Path $HOME ".claude/agents/$x.md"))) { $missing += "agent:$x" }
+    }
+    if ($stale.Count -eq 0 -and $missing.Count -eq 0) { return $null }
+    $r = @()
+    if ($stale.Count) { $r += "Claude skill bundle(s) not at the Version lock: $($stale -join ' '): $($script:ClaudeForce)" }
+    if ($missing.Count) { $r += "Claude skill bundle entries missing: $($missing -join ' '): $($script:ClaudeForce)" }
+    return @{ Status = 'WARN'; Reason = ($r -join '; ') }
+}
+Register 'check_claude_bundles'
+
 # WARN (never FAIL): ARIS (aris@aris) is not enabled, or its `codex` MCP
 # server is missing or starts a server.py that does not exist (50-claude.ps1
 # registers python and server.py from the plugin's current installPath).

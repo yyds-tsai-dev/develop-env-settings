@@ -26,6 +26,7 @@ Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
 {{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "50-claude") }}
 # Locks: codebase-memory-mcp={{ $cbm }} graphifyy={{ index .versions "graphifyy" | default "" }}
 # Codex bundle locks (a changed one re-runs this script so installed plugins are updated):{{ range .codex.skill_bundles }} {{ .name }}={{ index $.versions .name | default .ref }}{{ end }}
+# Claude skill bundle locks:{{ range (index .claude "skill_bundles" | default list) }} {{ .name }}={{ index $.versions .name | default "" }}{{ end }}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 cd "$HOME" || exit 0
@@ -128,6 +129,84 @@ else
     skipped "graphify not installed on this desktop; skipping the graphify skill"
 {{- end }}
 fi
+{{- end }}
+{{- end }}
+
+# --- Claude skill bundles (allowlisted skills and agents from a repo tarball) ---
+# cbundle NAME REPO REF VERSION SKILLS_DIR AGENTS_DIR SKILLS AGENTS: copy each
+# allowlisted SKILLS_DIR/<skill>/ (whole dir) to ~/.claude/skills/<skill>/ and
+# AGENTS_DIR/<agent>.md to ~/.claude/agents/, then record them in $CB/NAME
+# ("version V", "skill N", "agent N"). A recorded entry that left the allowlist
+# is removed; nothing unrecorded is ever removed. An unrecorded target that
+# differs is moved to ~/.claude/.devenv-replaced/ first. The repo's own agents
+# are never written. Nothing is fetched when the record already matches.
+CB="$HOME/.local/state/develop-env/claude-bundles"
+{{- $own := list }}
+{{- range glob (joinPath .chezmoi.sourceDir "dot_claude/agents/*") }}{{ $own = append $own (base . | trimSuffix ".tmpl" | trimSuffix ".md") }}{{ end }}
+OWN_AGENTS={{ join " " $own | squote }}
+# cb_take SRC DST ENTRY: install SRC (dir or file) at DST unless identical.
+cb_take() {
+    if [ -e "$2" ]; then
+        if [ -d "$1" ]; then diff -r "$1" "$2" >/dev/null 2>&1 && return 0
+        else cmp -s "$1" "$2" && return 0; fi
+        if ! printf '%s\n' "$cbold" | grep -qxF "$3"; then
+            mkdir -p "$HOME/.claude/.devenv-replaced" \
+                && mv "$2" "$HOME/.claude/.devenv-replaced/${2##*/}.$(date +%Y%m%d%H%M%S)" \
+                || { warn "cannot move $2 aside"; return 1; }
+        fi
+    fi
+    { rm -rf "$2.devenv-new" && cp -R "$1" "$2.devenv-new" && rm -rf "$2" && mv "$2.devenv-new" "$2"; } \
+        || { warn "cannot install $2"; rm -rf "$2.devenv-new"; return 1; }
+}
+cbundle() {
+    cbn="$1" cbrepo="$2" cbref="$3" cbver="$4" cbsd="$5" cbad="$6" cbskills="$7" cbagents="$8"
+    cbst="$CB/$cbn"
+    cbold="$(cat "$cbst" 2>/dev/null)"
+    cbwant="version $cbver"
+    for x in $cbskills; do cbwant="$cbwant
+skill $x"; done
+    for x in $cbagents; do cbwant="$cbwant
+agent $x"; done
+    if [ "$cbold" = "$cbwant" ]; then
+        cbok=1
+        for x in $cbskills; do [ -f "$HOME/.claude/skills/$x/SKILL.md" ] || cbok=; done
+        for x in $cbagents; do [ -f "$HOME/.claude/agents/$x.md" ] || cbok=; done
+        [ -n "$cbok" ] && return 0
+    fi
+    cbtmp="$(mktemp -d)"
+    if ! { curl -fsSL --retry 3 -o "$cbtmp/b.tgz" "https://codeload.github.com/$cbrepo/tar.gz/$cbref" \
+           && mkdir "$cbtmp/r" && tar -xzf "$cbtmp/b.tgz" -C "$cbtmp/r" --strip-components=1; }; then
+        warn "could not fetch $cbrepo at $cbref"; rm -rf "$cbtmp"; return 0
+    fi
+    mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
+    cbnew="version $cbver"
+    for x in $cbskills; do
+        if [ ! -f "$cbtmp/r/$cbsd/$x/SKILL.md" ]; then warn "bundle $cbn has no skill $cbsd/$x"; continue; fi
+        cb_take "$cbtmp/r/$cbsd/$x" "$HOME/.claude/skills/$x" "skill $x" && cbnew="$cbnew
+skill $x"
+    done
+    for x in $cbagents; do
+        case " $OWN_AGENTS " in *" $x "*) warn "bundle $cbn: agent $x is one of this repo's own agents; not installed"; continue ;; esac
+        if [ ! -f "$cbtmp/r/$cbad/$x.md" ]; then warn "bundle $cbn has no agent $cbad/$x.md"; continue; fi
+        cb_take "$cbtmp/r/$cbad/$x.md" "$HOME/.claude/agents/$x.md" "agent $x" && cbnew="$cbnew
+agent $x"
+    done
+    # recorded entries that left the allowlist (and only those) are removed
+    printf '%s\n' "$cbold" | while read -r k x; do
+        case "$k" in
+            skill) case " $cbskills " in *" $x "*) ;; *) rm -rf "$HOME/.claude/skills/$x" ;; esac ;;
+            agent) case " $cbagents $OWN_AGENTS " in *" $x "*) ;; *) rm -f "$HOME/.claude/agents/$x.md" ;; esac ;;
+        esac
+    done
+    { mkdir -p "$CB" && printf '%s\n' "$cbnew" > "$cbst"; } || warn "cannot write $cbst"
+    rm -rf "$cbtmp"
+}
+{{- range (index .claude "skill_bundles" | default list) }}
+{{- $v := index $.versions .name | default "" }}
+{{- if and (contains "{version}" .ref) (not $v) }}
+warn {{ printf "%s: no locked version; skipped (run bin/update)" .name | squote }}
+{{- else }}
+cbundle {{ .name | squote }} {{ .repo | squote }} {{ replace "{version}" $v .ref | squote }} {{ $v | squote }} {{ .skills_dir | squote }} {{ .agents_dir | squote }} {{ join " " (index . "skills" | default list) | squote }} {{ join " " (index . "agents" | default list) | squote }}
 {{- end }}
 {{- end }}
 

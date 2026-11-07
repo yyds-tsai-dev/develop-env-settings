@@ -111,7 +111,7 @@ sys_path() {
   local t p
   mkdir -p "$SB/sys"
   for t in sh bash env awk sed grep cat cp mv rm mkdir mktemp cmp chmod tr head tail \
-           date dirname basename uname printf ls touch sort cut wc tee id find xargs; do
+           date dirname basename uname printf ls touch sort cut wc tee id find xargs tar gzip diff; do
     p="$(command -v "$t" 2>/dev/null)" && [ -x "$p" ] && ln -sf "$p" "$SB/sys/$t"
   done
   echo "$SB/sys"
@@ -497,6 +497,9 @@ EOF
   # uv python find 3.12: the Python ARIS's server falls back to without python3
   stub uv "echo \"uv \$*\" >> '$SB/calls'; [ \"\$1 \$2\" = 'python find' ] && echo '$STUB/python3.12'; exit 0"
   fake_aris 0123456789ab
+  # the Claude Scholar tarball for a script rendered to the usual path
+  [ -f "$SB/claude.sh" ] && fake_scholar "$SB/claude.sh"
+  true
 }
 
 # fake_aris VERSION: aris@aris installed at the cache dir for VERSION (as
@@ -747,6 +750,115 @@ EOF
   doc
   [[ "$output" == *"WARN claude_aris: aris@aris is not installed and enabled"* ]]
   ! printf '%s\n' "$output" | grep -q '^FAIL claude_aris'
+}
+
+# fake_scholar SCRIPT: a fixture repo for the rendered SCRIPT's cbundle line
+# (every allowlisted skill and agent, the excluded ones, and a `worker` agent
+# like this repo's own), served by a stub curl as the codeload tarball; other
+# URLs get a fake skill. Sets SCH_SKILLS / SCH_AGENTS; curl logs to $SB/curl.log.
+fake_scholar() {
+  capture() { SCH_REPO="$2"; SCH_SKILLS="$7"; SCH_AGENTS="$8"; }
+  eval "$(grep '^cbundle ' "$1" | sed 's/^cbundle/capture/')"
+  unset -f capture
+  r="$SB/scholar/top"
+  for x in $SCH_SKILLS planning-with-files daily-coding bug-detective git-workflow verification-loop; do
+    mkdir -p "$r/skills/$x/references"; echo "$x" > "$r/skills/$x/SKILL.md"; echo ref > "$r/skills/$x/references/a.md"
+  done
+  mkdir -p "$r/agents" "$r/hooks" "$r/commands"
+  for x in $SCH_AGENTS code-reviewer tdd-guide worker; do echo "upstream $x" > "$r/agents/$x.md"; done
+  echo hook > "$r/hooks/h.js"; echo cmd > "$r/commands/c.md"
+  cat > "$STUB/curl" <<EOF
+#!/bin/sh
+while [ \$# -gt 1 ]; do [ "\$1" = -o ] && { out="\$2"; url="\$3"; break; }; shift; done
+echo "\$url" >> "$SB/curl.log"
+case "\$url" in
+  https://codeload.github.com/$SCH_REPO/tar.gz/*) tar -czf "\$out" -C "$SB/scholar" top ;;
+  *) echo "skill from \$url" > "\$out" ;;
+esac
+EOF
+  chmod +x "$STUB/curl"
+}
+
+@test "Claude Scholar: only the allowlist at the pinned SHA, repo agents never written, only recorded entries removed" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  fake_scholar "$f"
+  grep -q "^cbundle 'claude-bundle-claude-scholar' 'Galaxy-Dawn/claude-scholar' '$(lock claude-bundle-claude-scholar)' " "$f"
+  [ "$(lock claude-bundle-claude-scholar)" = d394fb599ed9 ]
+  [ "$(echo $SCH_SKILLS | wc -w)" -eq 40 ] && [ "$(echo $SCH_AGENTS | wc -w)" -eq 4 ]
+  A="$SB_HOME/.claude/agents"; S="$SB_HOME/.claude/skills"
+  mkdir -p "$A" "$S/defuddle" "$S/writing-anti-ai" "$S/my-own"
+  echo "repo worker" > "$A/worker.md"; echo mine > "$S/my-own/SKILL.md"
+  cp -R "$SB/scholar/top/skills/defuddle/." "$S/defuddle/"          # hand-installed, identical: adopted
+  echo "edited by hand" > "$S/writing-anti-ai/SKILL.md"             # differs: moved aside
+  run_script "$f"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *warning* ]]
+  grep -qx "https://codeload.github.com/Galaxy-Dawn/claude-scholar/tar.gz/d394fb599ed9" "$SB/curl.log"
+  for x in $SCH_SKILLS; do [ -f "$S/$x/SKILL.md" ] && [ -f "$S/$x/references/a.md" ] || { echo "skill $x missing"; false; }; done
+  for x in $SCH_AGENTS; do [ "$(cat "$A/$x.md")" = "upstream $x" ]; done
+  for x in planning-with-files daily-coding bug-detective git-workflow verification-loop; do [ ! -e "$S/$x" ]; done
+  for x in code-reviewer tdd-guide; do [ ! -e "$A/$x.md" ]; done
+  [ "$(cat "$A/worker.md")" = "repo worker" ]
+  [ ! -e "$SB_HOME/.claude/hooks/h.js" ] && [ ! -e "$SB_HOME/.claude/commands" ]
+  [ "$(cat "$S/writing-anti-ai/SKILL.md")" = writing-anti-ai ]
+  grep -qx 'edited by hand' "$SB_HOME"/.claude/.devenv-replaced/writing-anti-ai.*/SKILL.md
+  st="$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  [ "$(head -n1 "$st")" = "version d394fb599ed9" ]
+  [ "$(grep -c '^skill ' "$st")" -eq 40 ] && [ "$(grep -c '^agent ' "$st")" -eq 4 ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  # rerun: the record matches, nothing fetched
+  : > "$SB/curl.log"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  ! grep -q codeload "$SB/curl.log"
+  # a skill and an agent leave the allowlist: removed (they were recorded); my-own stays
+  sed -i "s/^\(cbundle .*\) 'agent-identifier \(.*\)' 'kaggle-miner \(.*\)'$/\1 '\2' '\3'/" "$f"
+  grep -q "^cbundle .* 'architecture-design .*' 'literature-reviewer " "$f"
+  run_script "$f"
+  echo "$output"
+  [ ! -e "$S/agent-identifier" ] && [ ! -e "$A/kaggle-miner.md" ]
+  [ -f "$S/my-own/SKILL.md" ] && [ "$(cat "$A/worker.md")" = "repo worker" ]
+  ! grep -qx 'skill agent-identifier' "$st"
+  # an allowlist naming one of the repo's own agents never writes it
+  sed -i "s/^\(cbundle .*\) 'literature-reviewer \(.*\)'$/\1 'worker literature-reviewer \2'/" "$f"
+  run_script "$f"
+  echo "$output"
+  [[ "$output" == *"agent worker is one of this repo's own agents; not installed"* ]]
+  [ "$(cat "$A/worker.md")" = "repo worker" ]
+  ! grep -qx 'agent worker' "$st"
+}
+
+@test "Claude Scholar: the rendered allowlist excludes the over-broad entries and the repo's own agents" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_scholar "$f"
+  own="$(sed -n "s/^OWN_AGENTS='\(.*\)'$/\1/p" "$f")"
+  for a in deep-reasoner fast-worker researcher semble-search worker; do [[ " $own " == *" $a "* ]]; done
+  for x in planning-with-files daily-coding bug-detective git-workflow verification-loop; do [[ " $SCH_SKILLS " != *" $x "* ]]; done
+  for x in code-reviewer tdd-guide $own; do [[ " $SCH_AGENTS " != *" $x "* ]]; done
+  # the pin is in the script text, so a changed lock reruns it
+  grep -qx "# Claude skill bundle locks: claude-bundle-claude-scholar=$(lock claude-bundle-claude-scholar)" "$f"
+}
+
+@test "doctor claude_bundles: PASS at the locked SHA with every allowlisted entry, WARN otherwise" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  doc() { DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci; echo "$output"; }
+  doc
+  [[ "$output" == *"PASS claude_bundles"* ]]
+  rm -f "$SB_HOME/.claude/agents/paper-miner.md"; rm -rf "$SB_HOME/.claude/skills/defuddle"
+  doc
+  [[ "$output" == *"WARN claude_bundles: Claude skill bundle entries missing: skill:defuddle agent:paper-miner"* ]]
+  sed -i 's/^version .*/version 000000000000/' "$SB_HOME/.local/state/develop-env/claude-bundles/claude-bundle-claude-scholar"
+  doc
+  [[ "$output" == *"claude-bundle-claude-scholar(installed 000000000000, lock d394fb599ed9)"* ]]
+  ! printf '%s\n' "$output" | grep -q '^FAIL claude_bundles'
 }
 
 # bats test_tags=docker
