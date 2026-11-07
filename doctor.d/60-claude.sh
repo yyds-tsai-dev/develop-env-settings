@@ -106,6 +106,36 @@ check_claude_skills() {
 }
 register check_claude_skills
 
+# WARN (never FAIL): ARIS (aris@aris) is not enabled, or its `codex` MCP
+# server is missing or would start a server.py that does not exist. 50-claude
+# registers the bare aris-codex-mcp wrapper, which runs server.py from the
+# plugin's current installPath (`claude plugin list --json`); an older
+# registration names `python3 <path>/server.py` directly.
+check_claude_aris() {
+  local plug enabled root got cmd args srv repo
+  command -v claude >/dev/null 2>&1 || { echo "claude not on PATH"; return 3; }
+  plug="$(claude plugin list --json 2>/dev/null | awk 'index($0, "\"id\": \"aris@aris\"") { f = 1; next }
+           f && /^ *}/ { exit } f' )"
+  enabled="$(printf '%s\n' "$plug" | sed -n 's/^ *"enabled": *\([a-z]*\).*/\1/p')"
+  root="$(printf '%s\n' "$plug" | sed -n 's/^ *"installPath": *"\([^"]*\)".*/\1/p')"
+  [ "$enabled" = true ] || { echo "aris@aris is not installed and enabled: $DOCTOR_FIX"; return 3; }
+  got="$(claude mcp get codex 2>/dev/null)"
+  cmd="$(printf '%s\n' "$got" | sed -n 's/^ *Command: //p')"
+  args="$(printf '%s\n' "$got" | sed -n 's/^ *Args: *//p')"
+  [ -n "$cmd" ] || { echo "MCP server codex (ARIS reviewer) not registered: $DOCTOR_FIX"; return 3; }
+  case "$cmd" in
+    aris-codex-mcp)
+      command -v aris-codex-mcp >/dev/null 2>&1 || { echo "aris-codex-mcp not on PATH: run chezmoi apply"; return 3; }
+      srv="$root/mcp-servers/codex-exec/server.py" ;;
+    *) srv="${args##* }" ;;
+  esac
+  [ -f "$srv" ] || { echo "MCP server codex starts ${srv:-nothing}, which does not exist: $DOCTOR_FIX"; return 3; }
+  repo="$(cat "$HOME/.aris/repo" 2>/dev/null)"
+  [ -n "$repo" ] && [ -d "$repo" ] && return 0
+  echo "~/.aris/repo is missing or names a missing dir (${repo:-empty}): $DOCTOR_FIX"; return 3
+}
+register check_claude_aris
+
 # WARN (never FAIL): no statusline release is locked yet and no local build ran
 # (go missing), so settings.json has no statusLine.
 check_statusline_installed() {

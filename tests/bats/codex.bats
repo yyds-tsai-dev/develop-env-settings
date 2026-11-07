@@ -251,7 +251,10 @@ run_script() { HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$1"; }
   [ "$(lock codex-bundle-drawio | wc -c)" -eq 13 ]
   [ "$(readlink "$sk/academic-paper")" = "../skill-bundles/academic-research-skills-$(lock codex-bundle-academic-research-skills)/academic-paper" ]
   [ "$(readlink "$sk/alpha")" = "../skill-bundles/drawio-$(lock codex-bundle-drawio)/plugins/codex/drawio/skills/alpha" ] \
-    || [ "$(readlink "$sk/alpha")" = "../skill-bundles/superpowers-$(lock codex-bundle-superpowers)/skills/alpha" ]
+    || [ "$(readlink "$sk/alpha")" = "../skill-bundles/superpowers-$(lock codex-bundle-superpowers)/skills/alpha" ] \
+    || [ "$(readlink "$sk/alpha")" = "../skill-bundles/aris-$(lock codex-bundle-aris)/skills/skills-codex/alpha" ]
+  # ARIS: its Codex mirror at the same github-head lock as Claude's aris@aris
+  grep -qx "https://codeload.github.com/wanshuiyin/Auto-claude-code-research-in-sleep/tar.gz/$(lock codex-bundle-aris)" "$SB/curl.log"
   ls "$SB_HOME/.codex/skill-bundles/.replaced/" | grep -q '^caveman\.'   # moved aside, not deleted
   [ -d "$sk/.system/x" ]
   # superpowers resolves through the lock and its v-tag

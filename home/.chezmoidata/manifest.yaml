@@ -60,6 +60,7 @@ claude:
     - { name: academic-research-skills, source: none, repo: Imbad0202/academic-research-skills }
     - { name: drawio, source: none, repo: jgraph/drawio-mcp }
     - { name: openai-codex, source: none, repo: openai/codex-plugin-cc }
+    - { name: aris, source: none, repo: wanshuiyin/Auto-claude-code-research-in-sleep }
   plugins:
     - { name: "superpowers@claude-plugins-official", source: none, marketplace: claude-plugins-official }
     - { name: "mattpocock-skills@claude-plugins-official", source: none, marketplace: claude-plugins-official }
@@ -68,6 +69,9 @@ claude:
     - { name: "academic-research-skills@academic-research-skills", source: none, marketplace: academic-research-skills }
     - { name: "drawio@drawio", source: none, marketplace: drawio }
     - { name: "codex@openai-codex", source: none, marketplace: openai-codex }
+    # ARIS: 50-claude also does its /aris:setup (the `codex` MCP server through the managed
+    # aris-codex-mcp wrapper, ~/.aris/repo); its lock is codex-bundle-aris
+    - { name: "aris@aris", source: none, marketplace: aris }
   # Third-party Claude skills, reinstalled from upstream into ~/.claude/skills/<dir>/ (own skills
   # with no upstream are vendored under home/dot_claude/skills/; there are none today).
   # url: fetched as SKILL.md; {ref} is v<version> (lock key `version_from`, default `name`), or main.
@@ -98,6 +102,8 @@ codex:
     - { name: codex-bundle-caveman, source: "github-head:JuliusBrussee/caveman", bundle: caveman, repo: JuliusBrussee/caveman, ref: "{version}", skills: [skills/caveman], claude_plugin: "caveman@caveman", plugin_json: .claude-plugin/plugin.json }
     - { name: codex-bundle-adhd, source: "github-head:UditAkhourii/adhd", bundle: adhd, repo: UditAkhourii/adhd, ref: "{version}", skills: [skills/adhd], claude_plugin: "adhd@adhd", plugin_json: .claude-plugin/plugin.json }
     - { name: codex-bundle-mattpocock-skills, source: "github-head:mattpocock/skills", bundle: mattpocock-skills, repo: mattpocock/skills, ref: "{version}", skills_json: .claude-plugin/plugin.json, claude_plugin: "mattpocock-skills@claude-plugins-official", plugin_json: .claude-plugin/plugin.json }
+    # ARIS's Codex-native mirror (its .codex-plugin/plugin.json "skills" dir); no Codex plugin
+    - { name: codex-bundle-aris, source: "github-head:wanshuiyin/Auto-claude-code-research-in-sleep", bundle: aris, repo: wanshuiyin/Auto-claude-code-research-in-sleep, ref: "{version}", skills_dir: skills/skills-codex, claude_plugin: "aris@aris", plugin_json: .claude-plugin/plugin.json }
 installers:
   - { name: claude, source: none, kind: native-installer }
   - { name: codex, source: "github:openai/codex", tag_prefix: "rust-v", kind: standalone-installer }

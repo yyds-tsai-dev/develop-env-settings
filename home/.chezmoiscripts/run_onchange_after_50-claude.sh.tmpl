@@ -192,6 +192,32 @@ fi
 {{- end }}
 {{- end }}
 {{- end }}
+
+# --- ARIS (aris@aris): its `codex` reviewer MCP server and ~/.aris/repo ---
+# What the plugin's /aris:setup does, kept valid across plugin updates: the
+# plugin root is a versioned cache dir, so the server is the bare
+# aris-codex-mcp (~/.local/bin, managed), which starts server.py from the
+# current installPath; ~/.aris/repo is re-pointed here and by that wrapper
+# unless it names an ARIS clone outside the plugin cache. server.py needs
+# Python 3.9+: python3, else uv's 3.12 (installed when missing).
+aris_root="$(awk 'index($0, "\"aris@aris\": [") { f = 1; next }
+    f && /"installPath":/ { sub(/.*"installPath": *"/, ""); sub(/".*/, ""); print; exit }' \
+    "$HOME/.claude/plugins/installed_plugins.json" 2>/dev/null)"
+if [ ! -f "$aris_root/mcp-servers/codex-exec/server.py" ]; then
+    warn "aris@aris is not installed (no mcp-servers/codex-exec/server.py); skipping its codex MCP server"
+else
+    aris_cur="$(cat "$HOME/.aris/repo" 2>/dev/null)"
+    case "$aris_cur" in
+        "$aris_root") ;;
+        "$HOME/.claude/plugins/cache/aris/"*|'') mkdir -p "$HOME/.aris" && printf '%s\n' "$aris_root" > "$HOME/.aris/repo" ;;
+        *) [ -d "$aris_cur" ] || { mkdir -p "$HOME/.aris" && printf '%s\n' "$aris_root" > "$HOME/.aris/repo"; } ;;
+    esac
+    if ! { command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; sys.exit(sys.version_info < (3, 9))' 2>/dev/null; } \
+       && ! uv python find 3.12 >/dev/null 2>&1; then
+        uv python install 3.12 >/dev/null 2>&1 || warn "no python3 3.9+ and uv could not install Python 3.12 for the ARIS codex MCP server"
+    fi
+    mcp_server codex aris-codex-mcp
+fi
 fi
 
 # --- settings.json: the exact file chezmoi manages ---

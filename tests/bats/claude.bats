@@ -352,6 +352,9 @@ EOF
   done
   for m2 in $(manifest_mkts); do grep -qF "& claude plugin marketplace update '$m2'" "$f"; done
   grep -qF '# Codex bundle locks' "$f"
+  # ARIS: server.py from the current installPath, re-registered on every run
+  grep -qF "Set-McpServer 'codex' @(\$py, \$arisSrv)" "$f"
+  grep -qF "plugins.'aris@aris'" "$f"
   if command -v pwsh >/dev/null 2>&1; then
     # -File (not -Command): -Command does not pass trailing words as $args
     cat > "$SB/parse.ps1" <<'PS'
@@ -491,6 +494,31 @@ EOF
   stub npx "echo \"npx \$*\" >> '$SB/calls'"
   # curl -fsSL --retry 3 -o FILE URL: write a fake skill
   stub curl 'while [ $# -gt 1 ]; do [ "$1" = -o ] && { echo "skill from $3" > "$2"; exit 0; }; shift; done; exit 1'
+  # uv python find 3.12: the Python ARIS's server falls back to without python3
+  stub uv "echo \"uv \$*\" >> '$SB/calls'; [ \"\$1 \$2\" = 'python find' ] && echo '$STUB/python3.12'; exit 0"
+  fake_aris 0123456789ab
+}
+
+# fake_aris VERSION: aris@aris installed at the cache dir for VERSION (as
+# installed_plugins.json records it), with its codex-exec server.py.
+fake_aris() {
+  ARIS_ROOT="$SB_HOME/.claude/plugins/cache/aris/aris/$1"
+  mkdir -p "$ARIS_ROOT/mcp-servers/codex-exec"
+  echo 'import sys; print("aris server", *sys.argv[1:])' > "$ARIS_ROOT/mcp-servers/codex-exec/server.py"
+  cat > "$SB_HOME/.claude/plugins/installed_plugins.json" <<EOF
+{
+  "version": 2,
+  "plugins": {
+    "aris@aris": [
+      {
+        "scope": "user",
+        "installPath": "$ARIS_ROOT",
+        "version": "$1"
+      }
+    ]
+  }
+}
+EOF
 }
 
 run_script() {
@@ -616,6 +644,109 @@ EOF
   grep -v '^drawio:' "$SB/mcplist" > "$SB/m2"; mv "$SB/m2" "$SB/mcplist"
   DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci
   [[ "$output" == *"not registered: drawio: run $REPO_ROOT/bin/update (or re-run bootstrap)"* ]]
+}
+
+@test "ARIS: codex MCP server is the bare wrapper; ~/.aris/repo follows the plugin root across versions, a clone is kept" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  grep -qE '^ *mcp_server codex aris-codex-mcp$' "$f"
+  run_script "$f"
+  echo "$output"; cat "$SB/calls"
+  [ "$status" -eq 0 ]
+  grep -qx 'mcp add -s user codex -- aris-codex-mcp' "$SB/calls"
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  [ ! -e "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+  # a plugin update moves the root: ~/.aris/repo follows, the registration is unchanged
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcp/codex"
+  old="$ARIS_ROOT"; fake_aris fedcba987654; rm -rf "$old"
+  : > "$SB/calls"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  ! grep -q 'mcp add -s user codex' "$SB/calls"
+  ! grep -q 'mcp remove -s user codex' "$SB/calls"
+  # an old hand-made registration (python3 <abs path>/server.py) is replaced
+  printf '  Command: python3\n  Args: %s/mcp-servers/codex-exec/server.py\n' "$old" > "$SB/mcp/codex"
+  : > "$SB/calls"
+  run_script "$f"
+  grep -qx 'mcp remove -s user codex' "$SB/calls"
+  grep -qx 'mcp add -s user codex -- aris-codex-mcp' "$SB/calls"
+  # an ARIS clone outside the plugin cache is never overwritten
+  mkdir -p "$SB_HOME/src/aris"; echo "$SB_HOME/src/aris" > "$SB_HOME/.aris/repo"
+  fake_aris 111111111111
+  run_script "$f"
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$SB_HOME/src/aris" ]
+  # no plugin installed: a warning and a retry marker, no registration
+  rm -f "$SB_HOME/.claude/plugins/installed_plugins.json"; rm -f "$SB/mcp/codex"
+  : > "$SB/calls"
+  run_script "$f"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"aris@aris is not installed"* ]]
+  ! grep -q 'mcp add -s user codex' "$SB/calls"
+  [ -s "$SB_HOME/.local/state/develop-env/retry/50-claude" ]
+}
+
+@test "aris-codex-mcp starts server.py from the current plugin root and re-points a stale ~/.aris/repo" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  command -v python3 >/dev/null 2>&1 || skip "python3 not installed"
+  run render_home server
+  dest="${lines[${#lines[@]}-1]}"
+  w="$dest/.local/bin/aris-codex-mcp"
+  [ -x "$w" ]
+  sh -n "$w"
+  ! grep -qE '/home/|/ldaphome|/Users/' "$w"
+  fake_aris aaaaaaaaaaaa
+  mkdir -p "$SB_HOME/.aris"; echo "$SB_HOME/.claude/plugins/cache/aris/aris/000000000000" > "$SB_HOME/.aris/repo"
+  HOME="$SB_HOME" PATH="/usr/bin:/bin" run "$w" --flag
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "aris server --flag" ]
+  [ "$(cat "$SB_HOME/.aris/repo")" = "$ARIS_ROOT" ]
+  # without python3, uv's 3.12 runs it
+  stub uv "[ \"\$1 \$2 \$3\" = 'python find 3.12' ] && echo '$(command -v python3)'"
+  mkdir -p "$SB/nopy"; for c in sh awk cat mkdir; do ln -s "$(command -v $c)" "$SB/nopy/$c"; done
+  HOME="$SB_HOME" PATH="$STUB:$SB/nopy" run "$w"
+  echo "$output"
+  [ "$output" = "aris server" ]
+  # no plugin and no ~/.aris/repo: exit 1 with the install hint
+  rm -rf "$SB_HOME/.claude/plugins" "$SB_HOME/.aris"
+  HOME="$SB_HOME" PATH="/usr/bin:/bin" run "$w"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"claude plugin install aris@aris"* ]]
+}
+
+@test "doctor claude_aris: PASS with the wrapper and an existing server.py, WARN otherwise" {
+  fake_aris 0123456789ab
+  printf '[\n  {\n    "id": "aris@aris",\n    "version": "0123456789ab",\n    "enabled": true,\n    "installPath": "%s"\n  }\n]\n' "$ARIS_ROOT" > "$SB/plugins.json"
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcpget"
+  cat > "$STUB/claude" <<EOF
+#!/bin/sh
+case "\$1 \$2" in
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp get") [ -s "$SB/mcpget" ] || exit 1; cat "$SB/mcpget" ;;
+esac
+EOF
+  chmod +x "$STUB/claude"
+  stub aris-codex-mcp 'exit 0'
+  mkdir -p "$SB_HOME/.aris"; echo "$ARIS_ROOT" > "$SB_HOME/.aris/repo"
+  doc() { DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" --ci; echo "$output"; }
+  doc
+  [[ "$output" == *"PASS claude_aris"* ]]
+  # a registration naming a removed plugin version WARNs (never FAILs)
+  printf '  Command: python3\n  Args: %s/gone/mcp-servers/codex-exec/server.py\n' "$SB_HOME" > "$SB/mcpget"
+  doc
+  [[ "$output" == *"WARN claude_aris: MCP server codex starts $SB_HOME/gone/mcp-servers/codex-exec/server.py, which does not exist"* ]]
+  : > "$SB/mcpget"
+  doc
+  [[ "$output" == *"WARN claude_aris: MCP server codex (ARIS reviewer) not registered"* ]]
+  printf '  Command: aris-codex-mcp\n' > "$SB/mcpget"; rm -rf "$SB_HOME/.aris"
+  doc
+  [[ "$output" == *"WARN claude_aris: ~/.aris/repo is missing"* ]]
+  sed -i 's/"enabled": true/"enabled": false/' "$SB/plugins.json"
+  doc
+  [[ "$output" == *"WARN claude_aris: aris@aris is not installed and enabled"* ]]
+  ! printf '%s\n' "$output" | grep -q '^FAIL claude_aris'
 }
 
 # bats test_tags=docker

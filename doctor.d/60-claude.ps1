@@ -111,6 +111,35 @@ function check_claude_skills {
 }
 Register 'check_claude_skills'
 
+# WARN (never FAIL): ARIS (aris@aris) is not enabled, or its `codex` MCP
+# server is missing or starts a server.py that does not exist (50-claude.ps1
+# registers python and server.py from the plugin's current installPath).
+function check_claude_aris {
+    $ErrorActionPreference = 'Continue'   # local: claude's stderr must not become a FAIL (PowerShell 5.1)
+    if (-not (Test-ClaudePresent)) { return @{ Status = 'WARN'; Reason = 'claude not on PATH' } }
+    $plug = $null
+    try { $plug = @((& claude plugin list --json 2>$null) -join "`n" | ConvertFrom-Json) | Where-Object { $_.id -eq 'aris@aris' } | Select-Object -First 1 } catch { }
+    if (-not $plug -or -not $plug.enabled) { return @{ Status = 'WARN'; Reason = "aris@aris is not installed and enabled: $($script:ClaudeFix)" } }
+    $got = @(& claude mcp get codex 2>$null)
+    $cmd = ''; $cmdArgs = ''
+    foreach ($l in $got) {
+        if ($l -match '^\s*Command: (.*)$') { $cmd = $Matches[1].Trim() }
+        elseif ($l -match '^\s*Args:\s*(.*)$') { $cmdArgs = $Matches[1].Trim() }
+    }
+    if (-not $cmd) { return @{ Status = 'WARN'; Reason = "MCP server codex (ARIS reviewer) not registered: $($script:ClaudeFix)" } }
+    # the path may hold spaces, so compare the end of Args instead of splitting it
+    $srv = Join-Path "$($plug.installPath)" 'mcp-servers\codex-exec\server.py'
+    if (-not $cmdArgs.EndsWith($srv, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $srv)) {
+        return @{ Status = 'WARN'; Reason = "MCP server codex does not start $srv (registered: $cmd $cmdArgs): $($script:ClaudeFix)" }
+    }
+    $repoFile = Join-Path $HOME '.aris/repo'
+    $repo = ''
+    if (Test-Path $repoFile) { $repo = "$(Get-Content -Raw $repoFile)".Trim() }
+    if ($repo -and (Test-Path -LiteralPath $repo)) { return $null }
+    return @{ Status = 'WARN'; Reason = "~/.aris/repo is missing or names a missing dir: $($script:ClaudeFix)" }
+}
+Register 'check_claude_aris'
+
 # WARN (never FAIL): the statusline release download failed and no go to build it.
 function check_statusline_installed {
     if (Test-Path (Join-Path $HOME '.claude/statusline-bin.exe')) { return $null }

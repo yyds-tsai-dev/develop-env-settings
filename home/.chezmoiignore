@@ -14,6 +14,9 @@ README.md
 {{ if ne .chezmoi.os "darwin" }}
 .zshrc
 {{ end }}
+{{ if eq .chezmoi.os "windows" }}
+.local/bin/aris-codex-mcp
+{{ end }}
 {{ if not .isDesktop }}
 .config/desktop
 .wezterm.lua

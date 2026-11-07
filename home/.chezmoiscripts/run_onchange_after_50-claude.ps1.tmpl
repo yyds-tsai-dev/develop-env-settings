@@ -242,6 +242,48 @@ if ($claudeOk) {
     }
 {{- end }}
 {{- end }}
+
+    # --- ARIS (aris@aris): its `codex` reviewer MCP server and ~/.aris/repo ---
+    # What the plugin's /aris:setup does. The plugin root is a versioned cache
+    # dir, so every run re-registers server.py from the current installPath
+    # (the sh twin uses the aris-codex-mcp wrapper instead) and re-points
+    # ~/.aris/repo unless it names an ARIS clone outside the plugin cache.
+    # Python 3.9+: python3 or python (.exe), else uv's 3.12 (installed when missing).
+    $arisRoot = ''
+    try {
+        $reg = Get-Content -Raw (Join-Path $HOME '.claude\plugins\installed_plugins.json') | ConvertFrom-Json
+        $arisRoot = "$(@($reg.plugins.'aris@aris')[0].installPath)"
+    } catch { }
+    $arisSrv = if ($arisRoot) { Join-Path $arisRoot 'mcp-servers\codex-exec\server.py' } else { '' }
+    if (-not $arisSrv -or -not (Test-Path $arisSrv)) {
+        Warn-Step 'aris@aris is not installed (no mcp-servers\codex-exec\server.py); skipping its codex MCP server'
+    } else {
+        $arisFile = Join-Path $HOME '.aris\repo'
+        $arisCur = ''
+        if (Test-Path $arisFile) { $arisCur = "$(Get-Content -Raw $arisFile)".Trim() }
+        $arisCache = Join-Path $HOME '.claude\plugins\cache\aris\'
+        if ($arisCur -ne $arisRoot -and (-not $arisCur -or $arisCur.StartsWith($arisCache, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $arisCur))) {
+            New-Item -ItemType Directory -Force -Path (Split-Path $arisFile) | Out-Null
+            [IO.File]::WriteAllText($arisFile, "$arisRoot`n", (New-Object Text.UTF8Encoding $false))
+        }
+        $py = ''
+        foreach ($c in @('python3', 'python')) {
+            $src = (Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source
+            if ($src -and $src -match '\.exe$') {
+                & $src -c 'import sys; sys.exit(sys.version_info < (3, 9))' *> $null
+                if ($LASTEXITCODE -eq 0) { $py = $src; break }
+            }
+        }
+        if (-not $py -and (Test-Cmd 'uv')) {
+            $py = "$(& uv python find 3.12 2>$null)".Trim()
+            if (-not $py) {
+                & uv python install 3.12 *> $null
+                $py = "$(& uv python find 3.12 2>$null)".Trim()
+            }
+        }
+        if ($py) { Set-McpServer 'codex' @($py, $arisSrv) }
+        else { Warn-Step 'no python3 3.9+ and uv could not install Python 3.12; skipping the ARIS codex MCP server' }
+    }
 }
 
 # --- settings.json: the exact file chezmoi manages ---
