@@ -34,3 +34,4 @@ versions:
   statusline: 1.0.0
   tmux: '3.8_'
   uv: 0.13.3
+  zotero-mcp-server: 0.15.2

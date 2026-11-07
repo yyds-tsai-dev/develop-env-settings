@@ -249,3 +249,14 @@ def test_aris_one_lock_for_both_clients():
     assert "aris@aris" in {p["name"] for p in m["claude"]["plugins"]}
     # the ARIS codex server is registered by 50-claude, never a manifest MCP entry
     assert "mcp-codex" not in {e["name"] for e in m["mcp"]}
+
+
+def test_zotero_uv_tool_with_scite_extra_is_locked():
+    root = Path(__file__).resolve().parents[2] / "home/.chezmoidata"
+    m = yaml.safe_load((root / "manifest.yaml").read_text())
+    lock = yaml.safe_load((root / "versions.yaml").read_text())["versions"]
+    z, = [t for t in m["uv_tools"] if t["name"] == "zotero-mcp-server"]
+    assert z == {"name": "zotero-mcp-server", "source": "pypi:zotero-mcp-server", "spec": "zotero-mcp-server[scite]"}
+    assert lock["zotero-mcp-server"]
+    # zotero is a CLI skill, never an MCP server entry
+    assert not [e for e in m["mcp"] if "zotero" in e["name"]]

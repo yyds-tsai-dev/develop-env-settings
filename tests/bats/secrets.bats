@@ -5,6 +5,9 @@
 load helpers
 
 ENVFILE=".config/paper-search-mcp/.env"
+ZOTFILE=".config/zotero-mcp/config.json"
+# skipped TARGET: the number of "Bitwarden locked or missing" warnings for TARGET in $output.
+skipped() { grep -c "Bitwarden locked or missing: skipping $1\$" <<<"$output"; }
 
 setup() {
   new_sandbox
@@ -27,6 +30,7 @@ case "\$1 \$2" in
   "list items")
     case "\$*" in
       *paper-search*) echo '[{"name":"paper-search","fields":[{"name":"ieee_api_key","value":"FAKE-IEEE-KEY"},{"name":"unpaywall_email","value":"fake@example.invalid"}]}]' ;;
+      *zotero*) echo '[{"name":"zotero","fields":[{"name":"api_key","value":"FAKE-ZOTERO-KEY"},{"name":"library_id","value":"1234567"}]}]' ;;
       *) echo '[]' ;;
     esac ;;
   *) exit 1 ;;
@@ -59,7 +63,8 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   [ ! -e "$SB_DEST/$ENVFILE" ]
-  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+  [ "$(skipped "$ENVFILE")" -eq 1 ] && [ "$(skipped "$ZOTFILE")" -eq 1 ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 2 ]
   [[ "$output" == *"paper-search-mcp/.env"* ]]
 }
 
@@ -68,7 +73,8 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   apply_with "$SB/empty"
   [ "$status" -eq 0 ]
   [ ! -e "$SB_DEST/$ENVFILE" ]
-  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+  [ "$(skipped "$ENVFILE")" -eq 1 ] && [ "$(skipped "$ZOTFILE")" -eq 1 ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 2 ]
 }
 
 @test "apply exits 0 when locked" {
@@ -95,7 +101,8 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   [ "$(sha256sum "$SB_DEST/$ENVFILE")" = "$before" ]
-  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+  [ "$(skipped "$ENVFILE")" -eq 1 ] && [ "$(skipped "$ZOTFILE")" -eq 1 ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 2 ]
 }
 
 @test "bw that exits non-zero counts as locked: warning, exit 0" {
@@ -103,7 +110,8 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   apply_with "$STUB"
   [ "$status" -eq 0 ]
   [ ! -e "$SB_DEST/$ENVFILE" ]
-  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 1 ]
+  [ "$(skipped "$ENVFILE")" -eq 1 ] && [ "$(skipped "$ZOTFILE")" -eq 1 ]
+  [ "$(grep -c 'Bitwarden locked or missing' <<<"$output")" -eq 2 ]
 }
 
 @test "unlocked but field missing: existing file untouched, one warning" {
@@ -117,6 +125,24 @@ nobw() { command -v bw >/dev/null 2>&1 && skip "host has bw on PATH"; mkdir -p "
   [ "$(grep -c 'not found' <<<"$output")" -eq 1 ]
 }
 
+@test "unlocked vault renders the zotero config (mode 600, dir 700) from the zotero item" {
+  stub_bw unlocked
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  f="$SB_DEST/$ZOTFILE"
+  [ -f "$f" ]
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["client_env"]; assert d == {"ZOTERO_LOCAL": "false", "ZOTERO_NO_CLAUDE": "true", "ZOTERO_API_KEY": "FAKE-ZOTERO-KEY", "ZOTERO_LIBRARY_ID": "1234567", "ZOTERO_LIBRARY_TYPE": "user"}, d' "$f"
+  [ "$(stat -c %a "$f" 2>/dev/null || stat -f %Lp "$f")" = 600 ]
+  [ "$(stat -c %a "${f%/*}" 2>/dev/null || stat -f %Lp "${f%/*}")" = 700 ]
+  # a missing library_id skips it, leaving the existing file untouched
+  before="$(sha256sum "$f")"
+  sed 's/library_id/other_field/' "$STUB/bw" > "$SB/bw.new" && cat "$SB/bw.new" > "$STUB/bw"
+  apply_with "$STUB"
+  [ "$status" -eq 0 ]
+  [ "$(sha256sum "$f")" = "$before" ]
+  [[ "$output" == *"Bitwarden item zotero field library_id not found: skipping $ZOTFILE"* ]]
+}
+
 @test "no secret values are committed in the repo" {
-  ! git -C "$REPO_ROOT" grep -qE 'FAKE-IEEE-KEY|BW_SESSION=[A-Za-z0-9+/=]{20,}' -- home lib doctor.d
+  ! git -C "$REPO_ROOT" grep -qE 'FAKE-IEEE-KEY|FAKE-ZOTERO-KEY|BW_SESSION=[A-Za-z0-9+/=]{20,}' -- home lib doctor.d
 }

@@ -29,6 +29,9 @@ README.md
 .config/paper-search-mcp/.env
 {{   end }}
 {{ end }}
+{{ if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".config/zotero-mcp/config.json" "item" "zotero" "fields" (list "api_key" "library_id"))) }}
+.config/zotero-mcp/config.json
+{{ end }}
 {{ if .isDesktop }}
 {{   if not (includeTemplate "bw-ready" (dict "chezmoi" .chezmoi "target" ".ssh/config" "item" "ssh-hosts" "fields" (list "notes") "jsonList" true)) }}
 .ssh/config

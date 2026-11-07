@@ -1,0 +1,15 @@
+{{- /* Secret file (every role): zotero-cli's web-API settings. Skipped (left untouched) by .chezmoiignore via bw-ready unless the vault is unlocked and both fields of the Bitwarden item `zotero` exist. ZOTERO_NO_CLAUDE: no Claude Desktop config is written by `zotero-mcp setup`. */ -}}
+{{- $d := dict "chezmoi" .chezmoi "item" "zotero" -}}
+{{- $key := includeTemplate "bw-field" (merge (dict "field" "api_key") $d) | trim -}}
+{{- $lib := includeTemplate "bw-field" (merge (dict "field" "library_id") $d) | trim -}}
+{{- if and $key $lib -}}
+{
+  "client_env": {
+    "ZOTERO_LOCAL": "false",
+    "ZOTERO_NO_CLAUDE": "true",
+    "ZOTERO_API_KEY": {{ $key | toJson }},
+    "ZOTERO_LIBRARY_ID": {{ $lib | toJson }},
+    "ZOTERO_LIBRARY_TYPE": "user"
+  }
+}
+{{ end -}}

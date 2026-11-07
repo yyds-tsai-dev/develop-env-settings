@@ -1,0 +1,57 @@
+{{- if eq .chezmoi.os "windows" -}}
+{{- $zv := index .versions "zotero-mcp-server" | default "" -}}
+{{- $spec := "" }}{{ range .uv_tools }}{{ if eq .name "zotero-mcp-server" }}{{ $spec = .spec }}{{ end }}{{ end -}}
+# PowerShell twin of run_onchange_after_32-zotero.sh: the zotero-mcp-server uv
+# tool ({{ $spec }}=={{ $zv }}; zotero-cli.exe and zotero-mcp.exe in
+# ~/.local/bin) and its zotero-cli skill for Claude Code
+# (~/.claude/skills/zotero-cli) and Codex (~/.codex/skills/zotero-cli), from
+# `zotero-mcp install-skill` against a scratch root (the managed
+# ~/.codex/AGENTS.md carries the pointer block). No Zotero MCP server. Never
+# aborts apply; a failure leaves a retry marker with a fresh nonce, so the next
+# apply (re-run the bootstrap one-liner) reruns this; success removes it.
+{{ template "retry-marker" (dict "chezmoi" .chezmoi "name" "32-zotero") }}
+# Locks: zotero-mcp-server={{ $zv }}
+$ErrorActionPreference = 'Continue'
+$ProgressPreference = 'SilentlyContinue'
+{{ template "retry-ps1" "32-zotero" }}
+$bin = Join-Path $HOME '.local\bin'
+$env:Path = $bin + [IO.Path]::PathSeparator + $env:Path
+$zv = {{ $zv | squote }}
+$spec = {{ $spec | squote }}
+try {
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { throw 'uv missing; skipping zotero-mcp-server' }
+    $have = @(& uv tool list 2>$null) -join "`n"
+    if (-not $zv -or -not ($have -split "`n" -contains "zotero-mcp-server v$zv")) {
+        $pinned = $spec; if ($zv) { $pinned = "$spec==$zv" }
+        & uv tool install --quiet --python 3.12 $pinned
+        if ($LASTEXITCODE -ne 0 -and $zv) {
+            Write-Warning "uv tool install $pinned failed; retrying unpinned"
+            & uv tool install --quiet --python 3.12 $spec
+        }
+        if ($LASTEXITCODE -ne 0) { throw "uv tool install $spec failed" }
+    }
+    if (-not (Get-Command zotero-mcp -ErrorAction SilentlyContinue)) { throw 'zotero-mcp not on PATH after the install' }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('devenv-zotero-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    try {
+        Push-Location $tmp
+        & zotero-mcp install-skill --target agents --root $tmp --force *> (Join-Path $tmp 'log')
+        $rc = $LASTEXITCODE
+        Pop-Location
+        $src = Join-Path $tmp '.agents\skills\zotero-cli'
+        if ($rc -ne 0 -or -not (Test-Path (Join-Path $src 'SKILL.md'))) { throw "zotero-mcp install-skill failed (exit $rc)" }
+        foreach ($dst in @((Join-Path $HOME '.claude\skills\zotero-cli'), (Join-Path $HOME '.codex\skills\zotero-cli'))) {
+            New-Item -ItemType Directory -Force -Path (Split-Path $dst) | Out-Null
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue -LiteralPath $dst
+            Copy-Item -Recurse -Force -LiteralPath $src -Destination $dst -ErrorAction Stop
+        }
+    } finally {
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $tmp
+    }
+    Clear-RetryMarker
+} catch {
+    Write-Warning "zotero: $_ (re-running the bootstrap one-liner retries)"
+    Set-RetryMarker
+}
+exit 0
+{{- end }}

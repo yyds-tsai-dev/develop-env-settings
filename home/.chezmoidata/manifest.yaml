@@ -18,6 +18,9 @@ uv_tools:
   - { name: semble, source: "pypi:semble", spec: "semble[mcp]" }
   - { name: graphifyy, source: "pypi:graphifyy", spec: "graphifyy[mcp]" }
   - { name: paper-search-mcp, source: "pypi:paper-search-mcp", spec: "paper-search-mcp" }
+  # zotero-cli / zotero-mcp (scite extra: no credentials); every role through 32-zotero, which
+  # also installs its zotero-cli skill for Claude and Codex (no Zotero MCP server)
+  - { name: zotero-mcp-server, source: "pypi:zotero-mcp-server", spec: "zotero-mcp-server[scite]" }
 node: { major: 24 }
 mcp:
   - name: mcp-semble
