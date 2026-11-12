@@ -42,7 +42,10 @@ def note(msg):
 def run(cmd):
     """stdout of cmd, or None when the command is missing or fails."""
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        # stdin closed: Claude Code's subcommands crash on macOS when stdin is
+        # /dev/tty ("EINVAL: invalid argument, kqueue").
+        p = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                           text=True, timeout=300)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return p.stdout if p.returncode == 0 else None

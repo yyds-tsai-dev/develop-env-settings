@@ -924,3 +924,46 @@ EOF
   [[ "$output" == *"SKIP claude_login"* ]]
   ! printf '%s\n' "$output" | grep -q '^FAIL '
 }
+
+# Bootstrap runs apply and Doctor with stdin from /dev/tty, and Claude Code's
+# subcommands crash on macOS when stdin is /dev/tty ("EINVAL: invalid argument,
+# kqueue"). The stub records any call that can still read a line of stdin.
+@test "install script runs claude with stdin closed (Claude Code crashes on /dev/tty stdin)" {
+  [ "$(uname -s)" = Linux ] || skip "server role renders on linux"
+  f="$(render_script)"
+  fake_claude
+  for p in $(manifest_plugins); do printf '  {\n    "id": "%s"\n  },\n' "$p"; done > "$SB/plugins.json"
+  for m2 in $(manifest_mkts); do printf '  {\n    "name": "%s"\n  },\n' "$m2"; done > "$SB/mkts.json"
+  sed -i "2i if read -r _; then echo \"claude \$*\" >> '$SB/stdin'; fi" "$STUB/claude"
+  yes x | head -n 200 > "$SB/input"
+  HOME="$SB_HOME" PATH="$STUB:/usr/bin:/bin" run sh "$f" < "$SB/input"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -q '^plugin ' "$SB/calls"
+  [ ! -e "$SB/stdin" ]
+}
+
+@test "doctor runs its checks with stdin closed (Claude Code crashes on /dev/tty stdin)" {
+  fake_claude
+  for p in $(manifest_plugins); do printf '{"id": "%s"}\n' "$p"; done > "$SB/plugins.json"
+  cat > "$STUB/claude" <<EOF
+#!/bin/sh
+if read -r _; then echo "claude \$*" >> "$SB/stdin"; fi
+case "\$1 \$2" in
+  "--version "*) echo "9.9.9 (Claude Code)" ;;
+  "plugin list") cat "$SB/plugins.json" ;;
+  "mcp list") cat "$SB/mcplist" ;;
+  "auth status") exit 0 ;;
+esac
+EOF
+  printf 'semble: uvx - \342\234\224 Connected\ncodebase-memory-mcp: codebase-memory-mcp  - \342\234\224 Connected\ndrawio: npx - \342\234\224 Connected\n' > "$SB/mcplist"
+  for s in find-skills paper-search graphify codebase-memory; do
+    mkdir -p "$SB_HOME/.claude/skills/$s"; : > "$SB_HOME/.claude/skills/$s/SKILL.md"
+  done
+  yes x | head -n 200 > "$SB/input"
+  DEVENV_ROLE=server HOME="$SB_HOME" PATH="$STUB:$PATH" DOCTOR_ONLY='60-*' run "$REPO_ROOT/bin/doctor" < "$SB/input"
+  echo "$output"
+  [[ "$output" == *"PASS claude_plugins"* ]]
+  [[ "$output" == *"PASS claude_login"* ]]
+  [ ! -e "$SB/stdin" ]
+}

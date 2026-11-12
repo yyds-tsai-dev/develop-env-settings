@@ -13,6 +13,11 @@ export DOCTOR_ROOT="$ROOT"
 DOCTOR_CI=0
 [ "${1:-}" = "--ci" ] && DOCTOR_CI=1
 export DOCTOR_CI
+# No check reads input. Bootstrap runs Doctor with stdin from /dev/tty, and
+# Claude Code's subcommands (plugin, mcp, auth) crash on macOS with
+# "EINVAL: invalid argument, kqueue" when stdin is /dev/tty, so every check
+# gets /dev/null.
+exec </dev/null
 # What to run to retry installs and re-apply: checks quote it in their hints.
 # DOCTOR_FIX is enough when the owning install script failed (it left a retry
 # marker, so the next apply reruns it) or a managed file is missing.
