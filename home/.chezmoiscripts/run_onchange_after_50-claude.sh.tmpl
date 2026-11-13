@@ -30,6 +30,11 @@ Windows runs the PowerShell twin, run_onchange_after_50-claude.ps1. */ -}}
 PATH="$HOME/.local/bin:$PATH"
 export PATH
 cd "$HOME" || exit 0
+# Bootstrap runs apply with stdin from /dev/tty (for chezmoi's prompts), and
+# Claude Code's subcommands (plugin, mcp, auth) crash on macOS with
+# "EINVAL: invalid argument, kqueue" when stdin is /dev/tty. Nothing here reads
+# input, so stdin is /dev/null.
+exec </dev/null
 
 {{ template "retry-sh" "50-claude" }}
 FAILED=
