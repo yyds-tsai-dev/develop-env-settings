@@ -92,7 +92,11 @@ jobs:
           set -o pipefail
           rc=0
           sh bootstrap.sh --source "$GITHUB_WORKSPACE" --role "${{ matrix.role }}" --ci 2>&1 | tee bootstrap.out || rc=$?
-          PATH="$HOME/.local/bin:$PATH" bin/doctor --ci 2>&1 | tee doctor.out || rc=$?
+          # Doctor from chezmoi's working tree, where Bootstrap resolved the
+          # Version lock; the checkout keeps the committed (older) lock.
+          export PATH="$HOME/.local/bin:$PATH"
+          wt="$(chezmoi execute-template '{{ .chezmoi.workingTree }}')" || wt=.
+          "$wt/bin/doctor" --ci 2>&1 | tee doctor.out || rc=$?
           exit "$rc"
       - name: annotate failures
         if: failure()
@@ -116,7 +120,11 @@ jobs:
           set -o pipefail
           rc=0
           powershell -NoProfile -ExecutionPolicy Bypass -File bootstrap.ps1 -Source "$GITHUB_WORKSPACE" -Role desktop -Ci 2>&1 | tee bootstrap.out || rc=$?
-          pwsh -NoProfile -File bin/doctor.ps1 -Ci 2>&1 | tee doctor.out || rc=$?
+          # Doctor from chezmoi's working tree, where Bootstrap resolved the
+          # Version lock; the checkout keeps the committed (older) lock.
+          export PATH="$HOME/.local/bin:$PATH"
+          wt="$(chezmoi execute-template '{{ .chezmoi.workingTree }}')" || wt=.
+          pwsh -NoProfile -File "$wt/bin/doctor.ps1" -Ci 2>&1 | tee doctor.out || rc=$?
           exit "$rc"
       - name: annotate failures
         if: failure()
